@@ -1,4 +1,4 @@
-# # Signflo
+# Signflo
 
 **Point your phone at any document, describe how it should work, get back a
 live signable agreement — plus the repo that powers it, yours forever.**
