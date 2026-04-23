@@ -51,6 +51,13 @@ const createStatements = [
     image_path TEXT NOT NULL,
     created_at INTEGER NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS submission_tokens (
+    token TEXT PRIMARY KEY,
+    submission_id TEXT NOT NULL REFERENCES submissions(id),
+    role TEXT NOT NULL DEFAULT 'owner',
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_submission_tokens_submission ON submission_tokens(submission_id)`,
 ];
 
 for (const sql of createStatements) {

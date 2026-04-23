@@ -44,9 +44,28 @@ export const signatures = sqliteTable("signatures", {
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
 
+/**
+ * URL-as-bearer-token ownership. Anyone with the token has owner access to
+ * the submission at /s/{token}. Multiple tokens per submission are supported
+ * (future: viewer/reviewer tokens) but MVP only mints "owner".
+ */
+export const submissionTokens = sqliteTable("submission_tokens", {
+  /** 32-char URL-safe base64 string (~192 bits entropy). */
+  token: text("token").primaryKey(),
+  submissionId: text("submission_id")
+    .notNull()
+    .references(() => submissions.id),
+  role: text("role", { enum: ["owner", "viewer", "reviewer"] })
+    .notNull()
+    .default("owner"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
 export type Agreement = typeof agreements.$inferSelect;
 export type NewAgreement = typeof agreements.$inferInsert;
 export type Submission = typeof submissions.$inferSelect;
 export type NewSubmission = typeof submissions.$inferInsert;
 export type Signature = typeof signatures.$inferSelect;
 export type NewSignature = typeof signatures.$inferInsert;
+export type SubmissionToken = typeof submissionTokens.$inferSelect;
+export type NewSubmissionToken = typeof submissionTokens.$inferInsert;
