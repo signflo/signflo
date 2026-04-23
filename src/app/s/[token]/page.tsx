@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getTokenContext } from "@/lib/tokens/queries";
 import { WORKFLOW_COMPLETE } from "@/lib/workflow/types";
 import type { AgreementField } from "@/lib/vision/types";
+import { FormRenderer } from "@/components/form-renderer/FormRenderer";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -18,6 +19,13 @@ export default async function OwnerTokenPage({ params }: PageProps) {
 
   const { agreement, submission, role } = ctx;
   const schema = agreement.schema;
+
+  // Draft submissions render the editable form pre-filled from saved data.
+  // The FormRenderer's auto-save is already token-aware via initialDraftToken.
+  if (submission.status === "draft") {
+    return <DraftEditView agreementId={agreement.id} agreementShortId={agreement.shortId} schema={schema} token={token} initialValues={submission.data as Record<string, unknown>} lowConfidenceFieldIds={agreement.lowConfidenceFieldIds} agreementTitle={schema.title} documentType={schema.documentType} />;
+  }
+
   const isComplete = submission.currentStepIndex === WORKFLOW_COMPLETE;
   const currentStep =
     submission.currentStepIndex === WORKFLOW_COMPLETE
@@ -235,4 +243,59 @@ function formatValue(field: AgreementField, value: unknown): string | null {
     return (value as { name: string }).name;
   }
   return JSON.stringify(value);
+}
+
+interface DraftEditViewProps {
+  agreementId: string;
+  agreementShortId: string;
+  agreementTitle: string;
+  documentType: string;
+  schema: import("@/lib/vision/types").AgreementSchema;
+  initialValues: Record<string, unknown>;
+  lowConfidenceFieldIds: string[];
+  token: string;
+}
+
+function DraftEditView({
+  agreementId,
+  agreementShortId,
+  agreementTitle,
+  documentType,
+  schema,
+  initialValues,
+  lowConfidenceFieldIds,
+  token,
+}: DraftEditViewProps) {
+  return (
+    <main className="min-h-screen bg-neutral-50 text-neutral-900">
+      <div className="max-w-2xl mx-auto px-5 py-12 sm:px-6 sm:py-16">
+        <header className="mb-8">
+          <div className="flex items-baseline justify-between mb-2">
+            <div className="text-xs uppercase tracking-wide text-neutral-500">
+              {documentType}
+            </div>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
+              Draft
+            </span>
+          </div>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight leading-tight">
+            {agreementTitle}
+          </h1>
+          <p className="mt-2 text-sm text-neutral-600">
+            Your changes auto-save as you type. Close the tab and return via this
+            URL whenever you're ready to finish.
+          </p>
+        </header>
+
+        <FormRenderer
+          agreementId={agreementId}
+          shortId={agreementShortId}
+          schema={schema}
+          lowConfidenceFieldIds={lowConfidenceFieldIds}
+          initialDraftToken={token}
+          initialValues={initialValues}
+        />
+      </div>
+    </main>
+  );
 }
