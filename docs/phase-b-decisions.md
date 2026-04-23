@@ -52,6 +52,8 @@ Each decision below is an autonomous call — the alternative is listed so David
 
 **How to override:** extend the `submissions` table with `status: "draft"`, add a debounced save effect in `FormRenderer`, load drafts by cookie or URL token on mount.
 
+**Comments:** I think it would be better to have this, but I'm not sure we need it for Phase B. Thoughts?
+
 ---
 
 ## 5. File uploads: accepted, minimally validated
@@ -76,6 +78,8 @@ Each decision below is an autonomous call — the alternative is listed so David
 
 **How to override:** extend `AgreementSchema` with a `constraints` array (e.g. `[{type: "one-of", fieldIds: [...]}]`) and enforce in both the client (`FormRenderer`) and server (`/api/submissions`).
 
+**Comments:** I'm generally fine with this but when we get to workflows, this means we need to be able to support a rework workflow; if we don't validate the fields and check for completeness, then we may need to send it back to the signer or send it back to Party A or B if something was not done correctly. 
+
 ---
 
 ## 7. Typography and color: default Tailwind stack
@@ -87,6 +91,8 @@ Each decision below is an autonomous call — the alternative is listed so David
 **Why not:** The form UI and the agreement PDF are different surfaces. Matching the original's style on the *form* risks looking like a knockoff; keeping it clean-neutral signals "Signflo wrapped around your document." Debatable — David can call it.
 
 **How to override:** load Inter + Source Serif 4 via `next/font`, apply the extracted `styleFingerprint.typography` to the form wrapper.
+
+**Comments:** I think that getting the form UI as close to the original document as possible would be a better user experience, and the better wow factor in the demo. That is what will make Signflo feel like a user has the ability to simply digitize the document by snapping a photo with their phone. I'm open to other ideas and would love to hear y'all's thoughts.
 
 ---
 
@@ -123,6 +129,11 @@ After a successful ingestion, the `/ingest` result card now shows two buttons: "
 ## Open questions for David
 
 - For the 5-row address pattern we saw in testing, do you want the form to render all 20 fields (current behavior) or start condensed and let the user expand rows?
+  - I think that the current behavior is fine. It's better to have all the fields visible so that the user can fill them out without having to expand any rows. If the user doesn't need to fill out all the fields, they can just leave them blank. I am open to other ideas and would love to hear your thoughts.
 - Are you OK with the form-filling UI staying visually neutral and saving the per-document look for the generated PDF only?
+  - I think that we should apply the style fingerprint to the form UI so that the form visually matches the original document. That is what will make Signflo feel like a user has the ability to simply digitize the document by snapping a photo with their phone. I am open to other ideas and would love to hear your thoughts.
 - In Phase B full, should the high-fidelity rendered PDF be visible inside the compare view, or only downloadable from `/a/[shortId]/complete`?
+  - I think that we should make the rendered PDF visible inside the compare view. I am open to other ideas and would love to hear your thoughts.
 - Do we want per-submission ownership/auth at all in MVP, or is "anyone with the URL can fill and submit" fine for the demo?
+  - I think that we should implement per-submission ownership/auth in MVP. It's better to have it from the beginning than to add it later. 
+  - I am open to other ideas and would love to hear your thoughts.
