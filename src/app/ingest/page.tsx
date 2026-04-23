@@ -46,7 +46,21 @@ export default function IngestPage() {
       if (!res.ok) {
         setError(body.error ?? `HTTP ${res.status}`);
       } else {
-        setResult(body as IngestResponse);
+        // Defensive normalization: the API should always return a well-formed
+        // shape, but a bad Opus tool-call response could surface as nested
+        // keys. Falling back to empty arrays here prevents a runtime crash
+        // on display.
+        const normalized: IngestResponse = {
+          ...body,
+          schema: {
+            title: body.schema?.title ?? "Untitled agreement",
+            documentType: body.schema?.documentType ?? "document",
+            fields: body.schema?.fields ?? [],
+            signatureBlocks: body.schema?.signatureBlocks ?? [],
+          },
+          lowConfidenceFieldIds: body.lowConfidenceFieldIds ?? [],
+        };
+        setResult(normalized);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

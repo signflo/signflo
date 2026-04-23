@@ -60,3 +60,51 @@
 - **Field grouping.** Multi-row forms (5-address shipping letter) emit flat fields with pattern IDs (`alt-address-1-street`, …, `alt-address-5-street`). Future schema feature: `fieldGroups` with a template + N instances, for prettier rendering of "+ Add another" UX.
 - **Already-signed signature blocks.** Vehicle MCO surfaced a pre-signed manufacturer signature in the schema. A `signerRole: "self" | "counterparty" | "pre-signed"` would disambiguate.
 - **Per-document timing:** digital PDF 35–57s, phone image 30–50s. Two Opus calls (extract + verify). Demo consideration: single-pass path for the hero flow with async verify.
+
+---
+
+# Phase C re-spike — targeted diagnostic run (2026-04-23)
+
+After the Phase C schema upgrades (`fieldGroups`, `radioGroups` via collapsed-radio emission, `signerRole`, `constraints` discriminated union) landed, we re-ingested 3 diagnostic documents from the Phase A corpus to verify the new shapes emerge correctly.
+
+## Diagnostic checks
+
+| Doc | What we were testing | Result |
+| --- | --- | --- |
+| Reliable Ducts AC | Radio collapse of 6 mutually-exclusive payment checkboxes | ✅ Single `radio` field "Choose Your Payment Option" with all 6 options in `options[]`. `signerRole: "self"` on the Purchaser block. |
+| Alternate Shipping Letter | Promotion of 5 repeating address rows to a `FieldGroup` | ✅ Flat fields collapsed from 27 → 6 top-level + 1 `FieldGroup` "Alternative Shipping Addresses" (template: street/city/state/zip, initial=5, min=1, max=5). Bonus: `all-or-none` constraint correctly emerged for the "if you provide a tax exemption cert, also provide the region" pattern. Low-confidence list collapsed from 17 → 1. |
+| Carry-On Trailer MCO | `signerRole: "pre-signed"` detection on the manufacturer signature | ✅ Manufacturer block correctly marked `signerRole: "pre-signed"` (was `None` in Phase A). Bonus: DOT Tire Identification Numbers grid promoted to a `FieldGroup` (template: QTY + Number, initial=11). |
+
+## Issues found and addressed during the re-spike
+
+### Constraint hallucination (Reliable Ducts, first pass)
+
+First-pass Phase-C Reliable Ducts emitted a `one-of` constraint referencing both `payment-option` (how to pay) AND `equipment-option-budget` (what equipment to buy) — semantically wrong, these are independent decisions.
+
+**Fix:** tightened both the extract and verify prompts:
+- Added a "Constraints must be SEMANTICALLY HOMOGENEOUS" rule — every field in a constraint's `fieldIds` must be an alternative of the same decision or category.
+- Added a "prefer radio collapse over `one-of`" rule — avoid constraints that duplicate what a `radio` field already expresses.
+- Added explicit negative examples of the payment-vs-equipment mis-constraint pattern.
+- Verifier got a matching rule to strip constraints whose members span unrelated decisions.
+
+**Verified on re-run.** Reliable Ducts re-ingested after the prompt fix: `constraints: []` (correctly restrained). Radio collapse + `signerRole` + all other shapes preserved.
+
+### Tool-input "double wrap" bug (discovered mid-spike)
+
+An intermediate Reliable Ducts run produced a response where Opus stuffed the entire `ExtractionResult` under the tool's `schema` property, leaving `styleFingerprint` and `lowConfidenceFieldIds` undefined. Caused by name collision between the tool's internal `schema` property and the conversational notion of "the whole extracted schema."
+
+**Fix:**
+- Renamed the tool's top-level `schema` property to `agreement`. `record_extracted_agreement` with a property called `agreement` has no semantic collision with "the whole result."
+- Added an explicit "populate THREE top-level properties as siblings, NOT nested inside each other" instruction to both prompts.
+- Added a defensive `parseExtractionResult()` helper that handles three input shapes: the correct new shape, the old `schema`-named shape, and the double-wrapped mis-response — so any future Opus drift doesn't break the ingest API.
+- Added defensive normalization on the `/ingest` client page so a malformed API response can't crash the UI.
+
+**Verified on re-run.** Schema stored correctly (title at root, 4 fields, 1 signature block with `signerRole: "self"`, empty constraints, styleFingerprint and lowConfidenceFieldIds columns populated).
+
+## Phase C shape deltas (vs. Phase A)
+
+- **Reliable Ducts:** 9 fields → 4 fields + 1 radio (with 6 collapsed options)
+- **Alt Shipping:** 27 flat fields → 6 top-level fields + 1 FieldGroup (4 fields × 5 instances) + 1 `all-or-none` constraint
+- **Carry-On MCO:** 8 flat fields + 0 signerRole → 6 top-level + 1 FieldGroup (2 fields × 11 instances) + `signerRole: "pre-signed"`
+
+Token spend on the re-spike + debugging: roughly 8 Opus 4.7 calls (~$3–4).

@@ -6,7 +6,7 @@ import type { ExtractionResult } from "./types";
 
 const SYSTEM_PROMPT = `You are Signflo's agreement-ingestion agent. Given an image or PDF of a document, you produce two things in a single structured response:
 
-1. A machine-readable schema describing every fillable field and signature block that IS ACTUALLY PRESENT in the source document, with position hints (0-1 normalized coordinates within each page), type, required/optional status, and self-reported confidence per field.
+1. A machine-readable schema describing every fillable field, field group, signature block, and cross-field constraint that IS ACTUALLY PRESENT in the source document.
 
 2. A visual style fingerprint that another agent will use to re-render the agreement at high fidelity: color palette, typography (font family and size guesses — use common Google Fonts names where possible: Inter, Source Serif 4, Source Sans 3, Georgia, Times New Roman, Helvetica, Arial, Merriweather, IBM Plex Sans/Serif/Mono, etc.), layout, header/footer content, logo presence and position, clause numbering style, signature block layout.
 
@@ -14,7 +14,7 @@ const SYSTEM_PROMPT = `You are Signflo's agreement-ingestion agent. Given an ima
 
 **Only emit fields that correspond to a visible form element in the source document** — an actual blank line, text-input box, checkbox, radio option, signature line, or similar. Do NOT emit fields that are "commonly" expected in similar documents but absent from THIS one. It is far better to miss a plausibly-implied field than to invent one.
 
-If something feels relevant but you cannot point to a specific visible mark on the page, put it in \`workflowHints\` or the style fingerprint's \`notes\` — not in \`fields\`.
+If something feels relevant but you cannot point to a specific visible mark on the page, put it in \`workflowHints\` or the style fingerprint's \`notes\` — not in \`fields\` or \`fieldGroups\`.
 
 Red-flag patterns that MUST go into \`workflowHints\` (not \`fields\`):
 - "Commonly captured alongside signature"
@@ -22,13 +22,71 @@ Red-flag patterns that MUST go into \`workflowHints\` (not \`fields\`):
 - "Usually required but not shown"
 - "Implied but not explicit"
 
+## Radio-vs-checkbox — collapse mutually-exclusive checkboxes into a single radio field
+
+When you see a cluster of checkboxes that are logically mutually exclusive (the user should pick exactly one), emit **one** field of type \`radio\` with the choices in the \`options\` array — do NOT emit N separate checkbox fields. Common patterns to collapse:
+
+- Payment options (Credit Card / Check / Cash / Finance / ...)
+- Inspection period choices (1 year / 2 years / 3 years)
+- Card brand (VISA / MasterCard / Discover / Amex)
+- Plan tier (Bronze / Silver / Gold)
+- Yes/No acceptance pairs
+
+Only emit separate checkboxes when each can be INDEPENDENTLY checked (e.g. "select all that apply" feature lists, acknowledgement clauses with independent toggles).
+
+## Field groups — use when you see repeating patterns
+
+When the document has ≥2 instances of the same field template (e.g. a table of 5 shipping-address rows where each row has {Street, City, State, Zip}), emit a single \`FieldGroup\` in \`fieldGroups[]\` with:
+- \`template\`: the per-instance fields (e.g. [street, city, state, zip])
+- \`initialInstances\`: the number of visible rows in the source
+- \`minInstances\`: the required count (usually 1)
+- \`maxInstances\`: hard cap (usually the source's row count)
+
+Fields inside a group's \`template\` MUST NOT also appear in the top-level \`fields\` array.
+
+Do NOT force a group when the pattern only appears once or when the visually-similar fields are semantically distinct (e.g. "home phone" and "work phone" — those are distinct fields, not instances of a group).
+
+## Signature blocks — signerRole
+
+For every signature block, populate \`signerRole\`:
+- \`"self"\` — the current signer (the person filling out this agreement) should sign this block.
+- \`"co-signer"\` — another signer on the same side as self (spouse, business partner, co-applicant).
+- \`"counterparty"\` — an opposing party will sign later (vendor, contractor, landlord).
+- \`"pre-signed"\` — already signed on the source (e.g. manufacturer's pre-signed Certificate of Origin, dealer pre-signature on an MCO). Render as static "Already signed."
+
+When in doubt between "self" and "counterparty", prefer "self" if the signer line appears near form fields the current user is filling (same page, aligned, same visual group). Prefer "counterparty" if it's clearly on a separate part of the document intended for someone else.
+
+## Constraints — emit cross-field rules the document expresses
+
+When the document makes rules about groups of fields that a single-field validator can't express, add an \`AgreementConstraint\` to \`constraints[]\`. Each constraint must be traceable to explicit or strongly-implied language in the source document.
+
+### Rules
+
+- **Constraints must be SEMANTICALLY HOMOGENEOUS.** Every field in a constraint's \`fieldIds\` must be an alternative (or related completion) of the SAME decision or category. Payment methods are semantic peers; equipment selection is a different decision entirely — do NOT combine unrelated choices into one constraint.
+- **Prefer radio collapse over \`one-of\` constraints.** If a group of mutually-exclusive choices can become a single \`type: "radio"\` field with the options collapsed, do that instead. Only emit a \`one-of\` constraint when the choices genuinely cannot be collapsed (e.g. they appear as checkboxes in different sections of the form, or they involve filling different data types that can't share a radio widget).
+- **Every constraint needs a human-readable \`message\`** that cites the actual rule from the document.
+
+### Constraint kinds
+
+- \`one-of\` — exactly one of \`fieldIds\` must be truthy. Useful for checkbox pairs like "I accept" / "I decline" when they appear as separate visual controls rather than a radio group.
+- \`at-least-n\` — at least N of \`fieldIds\` must be truthy (e.g. "check at least two preferred contact methods").
+- \`all-or-none\` — either all of \`fieldIds\` are filled or none are (e.g. co-signer info: if the co-signer's name is filled, their phone and address must also be; otherwise all three are blank). This is the most broadly useful kind — use it whenever the form has conditional-completion patterns.
+
+### Negative examples (DO NOT do these)
+
+- ❌ one-of \`[payment-option, equipment-selection]\` — payment and equipment are unrelated decisions.
+- ❌ one-of \`[customer-name, customer-address]\` — both are always filled on a customer form; not an exclusivity rule.
+- ❌ one-of \`[checkbox-A, checkbox-B, checkbox-C]\` when those three are already the options of a single radio field — redundant.
+
+Emit an empty \`constraints\` array if the document has no such rules. **When in doubt, omit the constraint** — a missing constraint is recoverable; an incorrect constraint will mislead validation.
+
 ## Other guidelines
 
 - Invent stable string IDs for fields and signature blocks (e.g. "party-a-name", "effective-date", "sig-party-a").
 - Set \`confidence\` below 0.7 for any field where the label or type is ambiguous, and include its ID in \`lowConfidenceFieldIds\`.
 - Prefer specific field types (\`email\`, \`date\`, \`phone\`) over generic \`text\` when the label signals the format.
 - If the document has numbered clauses, note the numbering style in \`clauseNumbering\`.
-- If no field is present at all (e.g. an informational doc), return an empty \`fields\` array but still produce a signature block if one is implied and visible.
+- If no field is present at all (e.g. an informational doc), return empty \`fields\` and \`fieldGroups\` arrays but still produce a signature block if one is implied and visible.
 - Respond ONLY by invoking the \`record_extracted_agreement\` tool exactly once. Do not include any other text.`;
 
 export interface ExtractInput {
@@ -77,7 +135,7 @@ export async function extractAgreement(input: ExtractInput): Promise<ExtractionR
 
   contentBlocks.push({
     type: "text",
-    text: "Extract the agreement schema and style fingerprint by calling the record_extracted_agreement tool exactly once.",
+    text: "Call the record_extracted_agreement tool exactly once. Populate all three top-level properties — `agreement`, `styleFingerprint`, and `lowConfidenceFieldIds` — as three siblings, NOT nested inside each other.",
   });
 
   const response = await client.messages.create({
@@ -96,5 +154,39 @@ export async function extractAgreement(input: ExtractInput): Promise<ExtractionR
     throw new Error("Opus did not invoke the extraction tool; response was: " + JSON.stringify(response.content));
   }
 
-  return toolUse.input as ExtractionResult;
+  return parseExtractionResult(toolUse.input);
+}
+
+/**
+ * Defensive parser for Opus's tool-call output. Handles two shapes:
+ *   (a) correct: { agreement, styleFingerprint, lowConfidenceFieldIds }
+ *   (b) legacy/wrapped: { schema: { agreement, styleFingerprint, lowConfidenceFieldIds } }
+ *   (c) legacy/wrapped: { schema: {...raw agreement...} }
+ * and maps to the ExtractionResult shape downstream code expects.
+ */
+export function parseExtractionResult(input: unknown): ExtractionResult {
+  const obj = (input ?? {}) as Record<string, unknown>;
+
+  // If the model wrapped everything under `schema`, unwrap one level.
+  if (
+    obj.schema &&
+    typeof obj.schema === "object" &&
+    !Array.isArray(obj.schema) &&
+    ("agreement" in (obj.schema as Record<string, unknown>) ||
+      "styleFingerprint" in (obj.schema as Record<string, unknown>) ||
+      "lowConfidenceFieldIds" in (obj.schema as Record<string, unknown>))
+  ) {
+    return parseExtractionResult(obj.schema);
+  }
+
+  // Prefer the new `agreement` key, fall back to `schema` for pre-rename runs.
+  const agreement = (obj.agreement ?? obj.schema) as ExtractionResult["schema"];
+  const styleFingerprint = obj.styleFingerprint as ExtractionResult["styleFingerprint"];
+  const lowConfidenceFieldIds = (obj.lowConfidenceFieldIds ?? []) as string[];
+
+  return {
+    schema: agreement,
+    styleFingerprint,
+    lowConfidenceFieldIds,
+  };
 }

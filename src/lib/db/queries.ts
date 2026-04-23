@@ -1,7 +1,11 @@
 import "server-only";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "./index";
-import type { AgreementSchema, StyleFingerprint } from "@/lib/vision/types";
+import type {
+  AgreementSchema,
+  SignatureBlock,
+  StyleFingerprint,
+} from "@/lib/vision/types";
 
 export interface AgreementRecord {
   id: string;
@@ -15,6 +19,30 @@ export interface AgreementRecord {
   createdAt: Date;
 }
 
+/**
+ * Normalize a schema loaded from SQLite. Agreements persisted before the
+ * Phase C schema upgrade won't have fieldGroups / constraints / signerRole.
+ * We fill in safe defaults so downstream code can iterate without guarding.
+ */
+function normalizeSchema(raw: unknown): AgreementSchema {
+  const s = raw as Partial<AgreementSchema>;
+  const signatureBlocks: SignatureBlock[] = (s.signatureBlocks ?? []).map((b) => ({
+    ...b,
+    signerRole: b.signerRole ?? "self",
+  }));
+  return {
+    title: s.title ?? "Untitled",
+    documentType: s.documentType ?? "document",
+    purpose: s.purpose,
+    fields: s.fields ?? [],
+    fieldGroups: s.fieldGroups ?? [],
+    signatureBlocks,
+    constraints: s.constraints ?? [],
+    clauseStructure: s.clauseStructure,
+    workflowHints: s.workflowHints,
+  };
+}
+
 export async function getAgreementByShortId(shortId: string): Promise<AgreementRecord | null> {
   const db = getDb();
   const rows = await db.select().from(schema.agreements).where(eq(schema.agreements.shortId, shortId)).limit(1);
@@ -26,7 +54,7 @@ export async function getAgreementByShortId(shortId: string): Promise<AgreementR
     title: row.title,
     sourceKind: row.sourceKind,
     sourcePath: row.sourcePath,
-    schema: row.schemaJson as AgreementSchema,
+    schema: normalizeSchema(row.schemaJson),
     styleFingerprint: (row.styleFingerprintJson ?? null) as StyleFingerprint | null,
     lowConfidenceFieldIds: (row.lowConfidenceFieldsJson ?? []) as string[],
     createdAt: row.createdAt,
@@ -44,7 +72,7 @@ export async function getAgreementById(id: string): Promise<AgreementRecord | nu
     title: row.title,
     sourceKind: row.sourceKind,
     sourcePath: row.sourcePath,
-    schema: row.schemaJson as AgreementSchema,
+    schema: normalizeSchema(row.schemaJson),
     styleFingerprint: (row.styleFingerprintJson ?? null) as StyleFingerprint | null,
     lowConfidenceFieldIds: (row.lowConfidenceFieldsJson ?? []) as string[],
     createdAt: row.createdAt,
