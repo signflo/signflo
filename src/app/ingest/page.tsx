@@ -122,8 +122,24 @@ export default function IngestPage() {
                   {result.schema.documentType} · {(result.elapsedMs / 1000).toFixed(1)}s
                 </span>
               </div>
-              <div className="text-sm text-neutral-500 mb-6">
-                id: <code className="font-mono">{result.shortId}</code>
+              <div className="flex items-center justify-between mb-6">
+                <div className="text-sm text-neutral-500">
+                  id: <code className="font-mono">{result.shortId}</code>
+                </div>
+                <div className="flex gap-2">
+                  <a
+                    href={`/a/${result.shortId}`}
+                    className="inline-flex items-center text-sm font-medium text-neutral-900 border border-neutral-300 rounded-md px-3 py-1.5 hover:bg-neutral-100 transition"
+                  >
+                    Open form →
+                  </a>
+                  <a
+                    href={`/a/${result.shortId}/compare`}
+                    className="inline-flex items-center text-sm text-neutral-600 border border-neutral-200 rounded-md px-3 py-1.5 hover:bg-neutral-100 transition"
+                  >
+                    Compare (dev)
+                  </a>
+                </div>
               </div>
 
               <h3 className="text-sm font-medium text-neutral-700 uppercase tracking-wide mb-3">
