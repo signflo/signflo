@@ -1,8 +1,16 @@
 import { z } from "zod";
 import type { AgreementField, AgreementSchema } from "@/lib/vision/types";
 
+/** Shared: build the flat form-field name for a field inside a group instance. */
+export function groupFieldName(groupId: string, instance: number, fieldId: string) {
+  return `${groupId}__${instance}__${fieldId}`;
+}
+
 /**
- * Derive a Zod schema from an AgreementSchema's fields.
+ * Derive a Zod schema from an AgreementSchema's fields and field groups.
+ * Flat submission shape — grouped fields get composite names like
+ * `{groupId}__{instance}__{fieldId}`.
+ *
  * Strict type coercion + per-type validation. `required` is enforced.
  * File fields are validated as string (the server stores a storage key).
  */
@@ -11,6 +19,18 @@ export function schemaToZod(schema: AgreementSchema) {
 
   for (const field of schema.fields) {
     shape[field.id] = fieldToZod(field);
+  }
+
+  for (const group of schema.fieldGroups) {
+    for (let i = 0; i < group.initialInstances; i++) {
+      for (const field of group.template) {
+        // Only the first instance honors `required`; additional instances are
+        // optional so users don't have to fill every rendered row.
+        const effectiveField: AgreementField =
+          i === 0 ? field : { ...field, required: false };
+        shape[groupFieldName(group.id, i, field.id)] = fieldToZod(effectiveField);
+      }
+    }
   }
 
   return z.object(shape);
