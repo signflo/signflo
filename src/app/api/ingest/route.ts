@@ -5,6 +5,7 @@ import { getStorage } from "@/lib/storage";
 import { extractAgreement, type ExtractInput } from "@/lib/vision/extract";
 import { verifyExtraction } from "@/lib/vision/verify";
 import { extractPdfText } from "@/lib/pdf/ingest";
+import { deriveDefaultWorkflow } from "@/lib/workflow/derive";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -79,6 +80,8 @@ export async function POST(request: NextRequest) {
     const firstPass = await extractAgreement(extractInput);
     const verified = await verifyExtraction(extractInput, firstPass);
 
+    const workflowSteps = deriveDefaultWorkflow(verified.schema);
+
     const db = getDb();
     await db.insert(schema.agreements).values({
       id: agreementId,
@@ -89,6 +92,7 @@ export async function POST(request: NextRequest) {
       schemaJson: verified.schema,
       styleFingerprintJson: verified.styleFingerprint,
       lowConfidenceFieldsJson: verified.lowConfidenceFieldIds,
+      workflowStepsJson: workflowSteps,
       createdAt: new Date(),
     });
 
@@ -98,6 +102,7 @@ export async function POST(request: NextRequest) {
       schema: verified.schema,
       styleFingerprint: verified.styleFingerprint,
       lowConfidenceFieldIds: verified.lowConfidenceFieldIds,
+      workflowSteps,
       elapsedMs: Date.now() - started,
     });
   } catch (err) {

@@ -9,6 +9,8 @@ export const agreements = sqliteTable("agreements", {
   schemaJson: text("schema_json", { mode: "json" }).notNull(),
   styleFingerprintJson: text("style_fingerprint_json", { mode: "json" }),
   lowConfidenceFieldsJson: text("low_confidence_fields_json", { mode: "json" }),
+  /** Ordered array of WorkflowStep (src/lib/workflow/types.ts). Nullable for pre-migration rows. */
+  workflowStepsJson: text("workflow_steps_json", { mode: "json" }),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
 
@@ -19,8 +21,12 @@ export const submissions = sqliteTable("submissions", {
     .references(() => agreements.id),
   dataJson: text("data_json", { mode: "json" }).notNull(),
   status: text("status", {
-    enum: ["started", "submitted", "signed"],
+    enum: ["draft", "started", "submitted", "signed"],
   }).notNull(),
+  /** Index into agreement.workflow_steps. -1 = workflow complete. */
+  currentStepIndex: integer("current_step_index").notNull().default(0),
+  /** Ordered array of WorkflowTransition (src/lib/workflow/types.ts). */
+  historyJson: text("history_json", { mode: "json" }),
   pdfPath: text("pdf_path"),
   pdfSha256: text("pdf_sha256"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),

@@ -6,6 +6,8 @@ import { getStorage } from "@/lib/storage";
 import { schemaToZod, groupFieldName } from "@/lib/form/validation";
 import type { AgreementField } from "@/lib/vision/types";
 import type { Storage as StorageIface } from "@/lib/storage";
+import { canTransition, advanceStep, startTransition } from "@/lib/workflow/transition";
+import { WORKFLOW_COMPLETE, type WorkflowTransition } from "@/lib/workflow/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -85,6 +87,38 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Workflow: persist the submission unconditionally (the data is already
+    // Zod-valid), then attempt to advance the step. Incomplete signatures
+    // keep the submission at the current step — they're not a validation
+    // error, just pending work. The API reports what's still needed.
+    const steps = agreement.workflowSteps ?? [];
+    const history: WorkflowTransition[] = [startTransition()];
+    let currentStepIndex = 0;
+    let isComplete = false;
+    let missingFieldIds: string[] = [];
+    let missingSignatureBlockIds: string[] = [];
+
+    if (steps.length > 0) {
+      const currentStep = steps[0];
+      // Phase C.2 has no signature capture yet — treat sig-block requirements
+      // as pending, not failing. Phase E will populate signedBlockIds from
+      // captured signatures and this will advance naturally.
+      const check = canTransition(currentStep, validatable, /* signed = */ []);
+      missingFieldIds = check.missingFieldIds;
+      missingSignatureBlockIds = check.missingSignatureBlockIds;
+
+      if (check.ok) {
+        const advance = advanceStep(0, steps);
+        history.push(advance.transition);
+        currentStepIndex = advance.nextStepIndex;
+        isComplete = currentStepIndex === WORKFLOW_COMPLETE;
+      }
+    } else {
+      // No workflow defined (legacy / edge case) → treat as complete.
+      currentStepIndex = WORKFLOW_COMPLETE;
+      isComplete = true;
+    }
+
     const now = new Date();
     const db = getDb();
     await db.insert(schema.submissions).values({
@@ -92,6 +126,8 @@ export async function POST(request: NextRequest) {
       agreementId: agreement.id,
       dataJson: data,
       status: "submitted",
+      currentStepIndex,
+      historyJson: history,
       createdAt: now,
       submittedAt: now,
     });
@@ -100,6 +136,10 @@ export async function POST(request: NextRequest) {
       submissionId,
       submissionShortId: submissionId,
       status: "submitted",
+      currentStepIndex,
+      isComplete,
+      missingFieldIds,
+      missingSignatureBlockIds,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

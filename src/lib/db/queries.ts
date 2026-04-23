@@ -6,6 +6,11 @@ import type {
   SignatureBlock,
   StyleFingerprint,
 } from "@/lib/vision/types";
+import type {
+  WorkflowStep,
+  WorkflowTransition,
+} from "@/lib/workflow/types";
+import { deriveDefaultWorkflow } from "@/lib/workflow/derive";
 
 export interface AgreementRecord {
   id: string;
@@ -16,6 +21,8 @@ export interface AgreementRecord {
   schema: AgreementSchema;
   styleFingerprint: StyleFingerprint | null;
   lowConfidenceFieldIds: string[];
+  /** Workflow steps persisted at ingest time. Derived on the fly for pre-migration rows. */
+  workflowSteps: WorkflowStep[];
   createdAt: Date;
 }
 
@@ -43,22 +50,35 @@ function normalizeSchema(raw: unknown): AgreementSchema {
   };
 }
 
-export async function getAgreementByShortId(shortId: string): Promise<AgreementRecord | null> {
-  const db = getDb();
-  const rows = await db.select().from(schema.agreements).where(eq(schema.agreements.shortId, shortId)).limit(1);
-  const row = rows[0];
-  if (!row) return null;
+/** Build the AgreementRecord from a raw Drizzle row. */
+function rowToRecord(row: typeof schema.agreements.$inferSelect): AgreementRecord {
+  const agreementSchema = normalizeSchema(row.schemaJson);
+  // Pre-migration rows have no workflow; derive on read so they still work.
+  const persistedSteps = row.workflowStepsJson as WorkflowStep[] | null;
+  const workflowSteps =
+    persistedSteps && persistedSteps.length > 0
+      ? persistedSteps
+      : deriveDefaultWorkflow(agreementSchema);
   return {
     id: row.id,
     shortId: row.shortId,
     title: row.title,
     sourceKind: row.sourceKind,
     sourcePath: row.sourcePath,
-    schema: normalizeSchema(row.schemaJson),
+    schema: agreementSchema,
     styleFingerprint: (row.styleFingerprintJson ?? null) as StyleFingerprint | null,
     lowConfidenceFieldIds: (row.lowConfidenceFieldsJson ?? []) as string[],
+    workflowSteps,
     createdAt: row.createdAt,
   };
+}
+
+export async function getAgreementByShortId(shortId: string): Promise<AgreementRecord | null> {
+  const db = getDb();
+  const rows = await db.select().from(schema.agreements).where(eq(schema.agreements.shortId, shortId)).limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  return rowToRecord(row);
 }
 
 export async function getAgreementById(id: string): Promise<AgreementRecord | null> {
@@ -66,17 +86,7 @@ export async function getAgreementById(id: string): Promise<AgreementRecord | nu
   const rows = await db.select().from(schema.agreements).where(eq(schema.agreements.id, id)).limit(1);
   const row = rows[0];
   if (!row) return null;
-  return {
-    id: row.id,
-    shortId: row.shortId,
-    title: row.title,
-    sourceKind: row.sourceKind,
-    sourcePath: row.sourcePath,
-    schema: normalizeSchema(row.schemaJson),
-    styleFingerprint: (row.styleFingerprintJson ?? null) as StyleFingerprint | null,
-    lowConfidenceFieldIds: (row.lowConfidenceFieldsJson ?? []) as string[],
-    createdAt: row.createdAt,
-  };
+  return rowToRecord(row);
 }
 
 export interface SubmissionRecord {
@@ -84,7 +94,9 @@ export interface SubmissionRecord {
   shortId: string;
   agreementId: string;
   data: Record<string, unknown>;
-  status: "started" | "submitted" | "signed";
+  status: "draft" | "started" | "submitted" | "signed";
+  currentStepIndex: number;
+  history: WorkflowTransition[];
   createdAt: Date;
   submittedAt: Date | null;
 }
@@ -99,7 +111,9 @@ export async function getSubmissionByShortId(shortId: string): Promise<Submissio
     shortId: row.id,
     agreementId: row.agreementId,
     data: row.dataJson as Record<string, unknown>,
-    status: row.status,
+    status: row.status as SubmissionRecord["status"],
+    currentStepIndex: row.currentStepIndex ?? 0,
+    history: (row.historyJson ?? []) as WorkflowTransition[],
     createdAt: row.createdAt,
     submittedAt: row.submittedAt,
   };
