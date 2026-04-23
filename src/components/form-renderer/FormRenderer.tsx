@@ -65,7 +65,13 @@ export function FormRenderer({ agreementId, shortId, schema, lowConfidenceFieldI
       return;
     }
     const body = await res.json();
-    window.location.href = `/a/${shortId}/complete?submission=${body.submissionShortId}`;
+    // Prefer the owner-token URL when the API provides one. Fall back to the
+    // Phase B confirmation page if token minting ever fails.
+    const target =
+      typeof body.ownerUrl === "string" && body.ownerUrl.length > 0
+        ? body.ownerUrl
+        : `/a/${shortId}/complete?submission=${body.submissionShortId}`;
+    window.location.href = target;
   };
 
   return (

@@ -8,6 +8,7 @@ import type { AgreementField } from "@/lib/vision/types";
 import type { Storage as StorageIface } from "@/lib/storage";
 import { canTransition, advanceStep, startTransition } from "@/lib/workflow/transition";
 import { WORKFLOW_COMPLETE, type WorkflowTransition } from "@/lib/workflow/types";
+import { mintSubmissionToken } from "@/lib/tokens/queries";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -132,6 +133,11 @@ export async function POST(request: NextRequest) {
       submittedAt: now,
     });
 
+    // Mint the owner bearer token. This is the ONE time the raw token value
+    // is sent over the wire — the client redirects the user to /s/{token}
+    // and uses that URL as their ongoing reference.
+    const ownerToken = await mintSubmissionToken(submissionId, "owner");
+
     return Response.json({
       submissionId,
       submissionShortId: submissionId,
@@ -140,6 +146,7 @@ export async function POST(request: NextRequest) {
       isComplete,
       missingFieldIds,
       missingSignatureBlockIds,
+      ownerUrl: `/s/${ownerToken}`,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
