@@ -111,13 +111,24 @@ Emit an empty \`constraints\` array if the document has no such rules. **When in
 - If no field is present at all (e.g. an informational doc), return empty \`fields\` and \`fieldGroups\` arrays but still produce a signature block if one is implied and visible.
 - Respond ONLY by invoking the \`record_extracted_agreement\` tool exactly once. Do not include any other text.`;
 
-export interface ExtractInput {
-  kind: "image" | "pdf";
+export interface ImagePage {
   mediaType: string;
   data: Buffer;
-  /** Optional extracted text layer (digital PDFs) to enrich extraction */
-  textLayer?: string;
 }
+
+export type ExtractInput =
+  | {
+      kind: "image";
+      /** One entry per page. For single-page sources this is a one-element array. */
+      pages: ImagePage[];
+    }
+  | {
+      kind: "pdf";
+      mediaType: string;
+      data: Buffer;
+      /** Optional extracted text layer (digital PDFs) to enrich extraction. */
+      textLayer?: string;
+    };
 
 export async function extractAgreement(input: ExtractInput): Promise<ExtractionResult> {
   const client = getAnthropic();
@@ -125,17 +136,35 @@ export async function extractAgreement(input: ExtractInput): Promise<ExtractionR
   const contentBlocks: Anthropic.ContentBlockParam[] = [];
 
   if (input.kind === "image") {
-    contentBlocks.push({
-      type: "image",
-      source: {
-        type: "base64",
-        media_type: input.mediaType as
-          | "image/jpeg"
-          | "image/png"
-          | "image/gif"
-          | "image/webp",
-        data: input.data.toString("base64"),
-      },
+    const total = input.pages.length;
+    if (total === 0) {
+      throw new Error("ExtractInput image: at least one page required");
+    }
+    if (total > 1) {
+      contentBlocks.push({
+        type: "text",
+        text: `This document has ${total} pages photographed separately. Treat them as one continuous agreement; pages are presented in order.`,
+      });
+    }
+    input.pages.forEach((page, i) => {
+      if (total > 1) {
+        contentBlocks.push({
+          type: "text",
+          text: `Page ${i + 1} of ${total}:`,
+        });
+      }
+      contentBlocks.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: page.mediaType as
+            | "image/jpeg"
+            | "image/png"
+            | "image/gif"
+            | "image/webp",
+          data: page.data.toString("base64"),
+        },
+      });
     });
   } else {
     contentBlocks.push({
@@ -146,13 +175,13 @@ export async function extractAgreement(input: ExtractInput): Promise<ExtractionR
         data: input.data.toString("base64"),
       },
     });
-  }
 
-  if (input.textLayer && input.textLayer.trim().length > 0) {
-    contentBlocks.push({
-      type: "text",
-      text: `Extracted text layer from the PDF (use as ground truth for text content, but rely on the document image for layout/styling):\n\n---\n${input.textLayer.slice(0, 50_000)}\n---`,
-    });
+    if (input.textLayer && input.textLayer.trim().length > 0) {
+      contentBlocks.push({
+        type: "text",
+        text: `Extracted text layer from the PDF (use as ground truth for text content, but rely on the document image for layout/styling):\n\n---\n${input.textLayer.slice(0, 50_000)}\n---`,
+      });
+    }
   }
 
   contentBlocks.push({

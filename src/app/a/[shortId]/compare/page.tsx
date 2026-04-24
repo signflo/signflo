@@ -37,7 +37,7 @@ export default async function ComparePage({ params, searchParams }: PageProps) {
         .limit(1);
 
   const submission = submissions[0] ?? null;
-  const sourceUrl = `/api/storage/${agreement.sourcePath}`;
+  const pageCount = agreement.sourcePaths.length;
 
   return (
     <main className="min-h-screen bg-neutral-100 text-neutral-900">
@@ -53,22 +53,36 @@ export default async function ComparePage({ params, searchParams }: PageProps) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 min-h-[calc(100vh-64px)]">
         <section className="border-r border-neutral-200 bg-white">
-          <div className="px-6 py-3 border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500">
-            Original source ({agreement.sourceKind})
-          </div>
-          <div className="p-4">
-            {agreement.sourceKind === "pdf" ? (
-              <object data={sourceUrl} type="application/pdf" className="w-full h-[80vh]">
-                <a href={sourceUrl}>Open source PDF</a>
-              </object>
-            ) : (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={sourceUrl}
-                alt="Original"
-                className="max-w-full h-auto border border-neutral-200 rounded"
-              />
+          <div className="px-6 py-3 border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 flex items-baseline justify-between">
+            <span>Original source ({agreement.sourceKind})</span>
+            {pageCount > 1 && (
+              <span className="font-mono normal-case text-neutral-400">{pageCount} pages</span>
             )}
+          </div>
+          <div className="p-4 space-y-4">
+            {agreement.sourcePaths.map((path, idx) => {
+              const url = `/api/storage/${path}`;
+              const isPdf = agreement.sourceKind === "pdf";
+              return (
+                <div key={path} className="space-y-1">
+                  {pageCount > 1 && (
+                    <div className="text-xs text-neutral-500 font-mono">Page {idx + 1}</div>
+                  )}
+                  {isPdf ? (
+                    <object data={url} type="application/pdf" className="w-full h-[80vh]">
+                      <a href={url}>Open source PDF</a>
+                    </object>
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={url}
+                      alt={`Page ${idx + 1}`}
+                      className="max-w-full h-auto border border-neutral-200 rounded"
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
         </section>
 

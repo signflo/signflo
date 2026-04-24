@@ -5,7 +5,20 @@ export const agreements = sqliteTable("agreements", {
   shortId: text("short_id").notNull().unique(),
   title: text("title").notNull(),
   sourceKind: text("source_kind", { enum: ["image", "pdf"] }).notNull(),
+  /**
+   * Legacy single-source path. Kept for backwards compat with pre-Phase-C-cleanup
+   * agreements. New code persists the full ordered list in `sourcePathsJson`
+   * and writes the first page here for safety.
+   */
   sourcePath: text("source_path").notNull(),
+  /**
+   * Ordered array of source file paths. For PDFs this is a single-element
+   * array (the PDF is its own multi-page entity). For multi-image agreements
+   * this contains one entry per page (e.g. ["sources/{id}/page-1.jpg", ...]).
+   * Nullable for pre-migration rows; queries.ts wraps `sourcePath` as a
+   * single-element array on read when this column is null.
+   */
+  sourcePathsJson: text("source_paths_json", { mode: "json" }),
   schemaJson: text("schema_json", { mode: "json" }).notNull(),
   styleFingerprintJson: text("style_fingerprint_json", { mode: "json" }),
   lowConfidenceFieldsJson: text("low_confidence_fields_json", { mode: "json" }),

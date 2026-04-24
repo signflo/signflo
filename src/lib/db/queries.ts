@@ -17,7 +17,10 @@ export interface AgreementRecord {
   shortId: string;
   title: string;
   sourceKind: "image" | "pdf";
+  /** Legacy single-source path; kept for backwards compat. Prefer `sourcePaths`. */
   sourcePath: string;
+  /** Ordered list of all source pages. For PDFs and pre-multi-page images, this is a single-element array. */
+  sourcePaths: string[];
   schema: AgreementSchema;
   styleFingerprint: StyleFingerprint | null;
   lowConfidenceFieldIds: string[];
@@ -59,12 +62,20 @@ function rowToRecord(row: typeof schema.agreements.$inferSelect): AgreementRecor
     persistedSteps && persistedSteps.length > 0
       ? persistedSteps
       : deriveDefaultWorkflow(agreementSchema);
+
+  // Multi-page back-compat: prefer the new sourcePathsJson array; fall back
+  // to wrapping the legacy single sourcePath as a one-element array.
+  const persistedPaths = row.sourcePathsJson as string[] | null;
+  const sourcePaths =
+    persistedPaths && persistedPaths.length > 0 ? persistedPaths : [row.sourcePath];
+
   return {
     id: row.id,
     shortId: row.shortId,
     title: row.title,
     sourceKind: row.sourceKind,
     sourcePath: row.sourcePath,
+    sourcePaths,
     schema: agreementSchema,
     styleFingerprint: (row.styleFingerprintJson ?? null) as StyleFingerprint | null,
     lowConfidenceFieldIds: (row.lowConfidenceFieldsJson ?? []) as string[],

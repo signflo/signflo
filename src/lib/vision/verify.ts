@@ -87,17 +87,32 @@ export async function verifyExtraction(
   const contentBlocks: Anthropic.ContentBlockParam[] = [];
 
   if (input.kind === "image") {
-    contentBlocks.push({
-      type: "image",
-      source: {
-        type: "base64",
-        media_type: input.mediaType as
-          | "image/jpeg"
-          | "image/png"
-          | "image/gif"
-          | "image/webp",
-        data: input.data.toString("base64"),
-      },
+    const total = input.pages.length;
+    if (total > 1) {
+      contentBlocks.push({
+        type: "text",
+        text: `This document has ${total} pages photographed separately. Treat them as one continuous agreement.`,
+      });
+    }
+    input.pages.forEach((page, i) => {
+      if (total > 1) {
+        contentBlocks.push({
+          type: "text",
+          text: `Page ${i + 1} of ${total}:`,
+        });
+      }
+      contentBlocks.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: page.mediaType as
+            | "image/jpeg"
+            | "image/png"
+            | "image/gif"
+            | "image/webp",
+          data: page.data.toString("base64"),
+        },
+      });
     });
   } else {
     contentBlocks.push({
