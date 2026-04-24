@@ -73,6 +73,7 @@ export function FormRenderer({
     register,
     handleSubmit,
     watch,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     mode: "onBlur",
@@ -94,8 +95,10 @@ export function FormRenderer({
 
   const onSubmit: SubmitHandler<FormValues> = async (values) => {
     setSubmitError(null);
-    // Stop auto-save during and after final submit so we don't race the
-    // POST to /api/submissions with a POST to /api/drafts.
+    // Stop auto-save during the final submit so we don't race the POST to
+    // /api/submissions with a POST to /api/drafts. Re-enabled on any
+    // failure path below so the user's corrections get auto-saved as they
+    // fix things.
     setPauseAutoSave(true);
 
     const fd = new FormData();
@@ -117,12 +120,52 @@ export function FormRenderer({
       }
     }
 
-    const res = await fetch("/api/submissions", { method: "POST", body: fd });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-      setSubmitError(body.error ?? `HTTP ${res.status}`);
+    let res: Response;
+    try {
+      res = await fetch("/api/submissions", { method: "POST", body: fd });
+    } catch (err) {
+      setPauseAutoSave(false);
+      setSubmitError(err instanceof Error ? err.message : String(err));
       return;
     }
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      // Re-enable auto-save so the user's corrections get persisted as
+      // they fix the highlighted fields.
+      setPauseAutoSave(false);
+
+      // Surface per-field server errors directly on the inputs that failed.
+      const fieldErrors = body.fieldErrors as Record<string, string> | undefined;
+      const failedFieldNames = fieldErrors ? Object.keys(fieldErrors) : [];
+      if (failedFieldNames.length > 0) {
+        failedFieldNames.forEach((name, idx) => {
+          try {
+            setError(
+              name,
+              { type: "server", message: fieldErrors![name] },
+              // shouldFocus on the first failing field — also scrolls into view.
+              { shouldFocus: idx === 0 },
+            );
+          } catch {
+            // setError can throw if the field name no longer matches a
+            // registered input (e.g. schema changed mid-session). Skip
+            // silently — the field-error visual won't render but the
+            // top-line summary still fires below.
+          }
+        });
+        const count = failedFieldNames.length;
+        setSubmitError(
+          count === 1
+            ? "1 field needs attention — see the highlighted input above."
+            : `${count} fields need attention — see the highlighted inputs above.`,
+        );
+      } else {
+        setSubmitError(body.error ?? `HTTP ${res.status}`);
+      }
+      return;
+    }
+
     const body = await res.json();
     // Prefer the owner-token URL when the API provides one. Fall back to the
     // Phase B confirmation page if token minting ever fails.
