@@ -91,6 +91,12 @@ const additiveColumns: Array<{ table: string; column: string; ddl: string }> = [
     column: "history_json",
     ddl: `ALTER TABLE submissions ADD COLUMN history_json TEXT`,
   },
+  // Phase C cleanup PR #9 — multi-page ingestion
+  {
+    table: "agreements",
+    column: "source_paths_json",
+    ddl: `ALTER TABLE agreements ADD COLUMN source_paths_json TEXT`,
+  },
 ];
 
 for (const m of additiveColumns) {
