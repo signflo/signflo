@@ -70,14 +70,29 @@ export function FormRenderer({
   initialValues,
 }: Props) {
   const {
-    register,
+    register: rawRegister,
     handleSubmit,
     watch,
+    setError,
+    clearErrors,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     mode: "onBlur",
     defaultValues: mergeDefaults(schema, initialValues),
   });
+
+  // Wrap register so any user edit clears that field's prior server error.
+  // Without this, a field that was setError'd on a failed submit keeps its
+  // error indicator until the next submit cycle even if the user has already
+  // fixed it.
+  const register: typeof rawRegister = (name, options) =>
+    rawRegister(name, {
+      ...options,
+      onChange: (e) => {
+        clearErrors(name as Parameters<typeof clearErrors>[0]);
+        return options?.onChange?.(e);
+      },
+    });
 
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [pauseAutoSave, setPauseAutoSave] = useState(false);
@@ -94,8 +109,10 @@ export function FormRenderer({
 
   const onSubmit: SubmitHandler<FormValues> = async (values) => {
     setSubmitError(null);
-    // Stop auto-save during and after final submit so we don't race the
-    // POST to /api/submissions with a POST to /api/drafts.
+    // Stop auto-save during the final submit so we don't race the POST to
+    // /api/submissions with a POST to /api/drafts. Re-enabled on any
+    // failure path below so the user's corrections get auto-saved as they
+    // fix things.
     setPauseAutoSave(true);
 
     const fd = new FormData();
@@ -117,12 +134,52 @@ export function FormRenderer({
       }
     }
 
-    const res = await fetch("/api/submissions", { method: "POST", body: fd });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-      setSubmitError(body.error ?? `HTTP ${res.status}`);
+    let res: Response;
+    try {
+      res = await fetch("/api/submissions", { method: "POST", body: fd });
+    } catch (err) {
+      setPauseAutoSave(false);
+      setSubmitError(err instanceof Error ? err.message : String(err));
       return;
     }
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      // Re-enable auto-save so the user's corrections get persisted as
+      // they fix the highlighted fields.
+      setPauseAutoSave(false);
+
+      // Surface per-field server errors directly on the inputs that failed.
+      const fieldErrors = body.fieldErrors as Record<string, string> | undefined;
+      const failedFieldNames = fieldErrors ? Object.keys(fieldErrors) : [];
+      if (failedFieldNames.length > 0) {
+        failedFieldNames.forEach((name, idx) => {
+          try {
+            setError(
+              name,
+              { type: "server", message: fieldErrors![name] },
+              // shouldFocus on the first failing field — also scrolls into view.
+              { shouldFocus: idx === 0 },
+            );
+          } catch {
+            // setError can throw if the field name no longer matches a
+            // registered input (e.g. schema changed mid-session). Skip
+            // silently — the field-error visual won't render but the
+            // top-line summary still fires below.
+          }
+        });
+        const count = failedFieldNames.length;
+        setSubmitError(
+          count === 1
+            ? "1 field needs attention — see the highlighted input above."
+            : `${count} fields need attention — see the highlighted inputs above.`,
+        );
+      } else {
+        setSubmitError(body.error ?? `HTTP ${res.status}`);
+      }
+      return;
+    }
+
     const body = await res.json();
     // Prefer the owner-token URL when the API provides one. Fall back to the
     // Phase B confirmation page if token minting ever fails.
@@ -149,7 +206,19 @@ export function FormRenderer({
   const sectioned = groupFieldsBySection(schema.fields);
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6" noValidate>
+    <form
+      onSubmit={(e) => {
+        // Clear stale server errors so the resubmit isn't a silent no-op.
+        // react-hook-form's handleSubmit gates on formState.errors, and
+        // setError-set errors don't auto-clear without an explicit
+        // clearErrors call. We clear all up front; the server returns the
+        // still-failing fields again if needed.
+        clearErrors();
+        return handleSubmit(onSubmit)(e);
+      }}
+      className="space-y-6"
+      noValidate
+    >
       {showLowConfBanner && (
         <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-4 text-sm">
           <div className="font-medium mb-1">Source quality flagged</div>

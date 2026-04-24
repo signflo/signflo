@@ -74,7 +74,16 @@ function fieldToZod(field: AgreementField): z.ZodTypeAny {
       break;
   }
 
-  if (field.required) {
+  // Phase E pre-ship: signature/initials fields are rendered as static
+  // placeholders the user cannot interact with. Enforcing `required` on
+  // them would block every submit until Phase E captures real signatures.
+  // Treat them as soft-optional in the validator so the rest of the form
+  // can submit; the workflow layer (canTransition) tracks signature
+  // pending-ness separately and reports it to the user via
+  // missingSignatureBlockIds. Revisit when Phase E ships.
+  const isSignatureLike = field.type === "signature" || field.type === "initials";
+
+  if (field.required && !isSignatureLike) {
     if (base instanceof z.ZodString) {
       return base.min(1, "Required");
     }
