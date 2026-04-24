@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { nanoid } from "nanoid";
 import { getDb, schema } from "@/lib/db";
 import { getStorage } from "@/lib/storage";
-import { extractAgreement, type ExtractInput } from "@/lib/vision/extract";
+import { extractAgreement, type ExtractInput, type ImagePage } from "@/lib/vision/extract";
 import { verifyExtraction } from "@/lib/vision/verify";
 import { extractPdfText } from "@/lib/pdf/ingest";
 import { deriveDefaultWorkflow } from "@/lib/workflow/derive";
@@ -23,63 +23,106 @@ const ACCEPTED_IMAGE_TYPES = new Set([
 
 const ACCEPTED_PDF_TYPE = "application/pdf";
 
+interface NormalizedFile {
+  data: Buffer;
+  mediaType: string;
+  isPdf: boolean;
+  isImage: boolean;
+}
+
 export async function POST(request: NextRequest) {
   const started = Date.now();
   try {
     const formData = await request.formData();
-    const file = formData.get("file");
+    // Accept either `file` (singular, legacy) or `files` (multiple, new).
+    const rawFiles: File[] = [
+      ...formData.getAll("files"),
+      ...formData.getAll("file"),
+    ].filter((v): v is File => v instanceof File && v.size > 0);
 
-    if (!(file instanceof File)) {
-      return Response.json({ error: "No file uploaded (expect multipart field 'file')" }, { status: 400 });
-    }
-
-    const arrayBuffer = await file.arrayBuffer();
-    const data = Buffer.from(arrayBuffer);
-    let mediaType = file.type || "application/octet-stream";
-
-    // HEIC images often arrive without a type set by the browser; trust the extension as fallback.
-    if (!mediaType || mediaType === "application/octet-stream") {
-      const name = file.name?.toLowerCase() ?? "";
-      if (name.endsWith(".heic")) mediaType = "image/heic";
-      else if (name.endsWith(".heif")) mediaType = "image/heif";
-      else if (name.endsWith(".pdf")) mediaType = "application/pdf";
-      else if (name.endsWith(".png")) mediaType = "image/png";
-      else if (name.endsWith(".jpg") || name.endsWith(".jpeg")) mediaType = "image/jpeg";
-    }
-
-    const isPdf = mediaType === ACCEPTED_PDF_TYPE;
-    const isImage = ACCEPTED_IMAGE_TYPES.has(mediaType);
-
-    if (!isPdf && !isImage) {
+    if (rawFiles.length === 0) {
       return Response.json(
-        { error: `Unsupported file type: ${mediaType}. Accepted: images (jpg/png/heic) and application/pdf.` },
-        { status: 415 },
+        { error: "No file uploaded (expect multipart field 'file' or 'files')" },
+        { status: 400 },
+      );
+    }
+
+    const normalized: NormalizedFile[] = [];
+    for (const f of rawFiles) {
+      const buf = Buffer.from(await f.arrayBuffer());
+      let mediaType = f.type || "application/octet-stream";
+      if (!mediaType || mediaType === "application/octet-stream") {
+        const name = f.name?.toLowerCase() ?? "";
+        if (name.endsWith(".heic")) mediaType = "image/heic";
+        else if (name.endsWith(".heif")) mediaType = "image/heif";
+        else if (name.endsWith(".pdf")) mediaType = "application/pdf";
+        else if (name.endsWith(".png")) mediaType = "image/png";
+        else if (name.endsWith(".jpg") || name.endsWith(".jpeg")) mediaType = "image/jpeg";
+      }
+      const isPdf = mediaType === ACCEPTED_PDF_TYPE;
+      const isImage = ACCEPTED_IMAGE_TYPES.has(mediaType);
+      if (!isPdf && !isImage) {
+        return Response.json(
+          { error: `Unsupported file type: ${mediaType}. Accepted: images (jpg/png/heic) and application/pdf.` },
+          { status: 415 },
+        );
+      }
+      normalized.push({ data: buf, mediaType, isPdf, isImage });
+    }
+
+    // Multi-page rules: PDFs must be solo (a PDF is its own multi-page entity);
+    // images can be 1..N pages of one logical agreement.
+    const hasPdf = normalized.some((f) => f.isPdf);
+    if (hasPdf && normalized.length > 1) {
+      return Response.json(
+        {
+          error:
+            "PDFs are inherently multi-page — please upload a single PDF, not a PDF combined with other files.",
+        },
+        { status: 400 },
       );
     }
 
     const agreementId = nanoid();
     const shortId = nanoid(10);
-
     const storage = getStorage();
-    const ext = isPdf ? "pdf" : mediaType.split("/")[1] ?? "bin";
-    const sourceKey = `sources/${agreementId}.${ext}`;
-    await storage.put(sourceKey, data);
-
-    // Digital-PDF text layer (best-effort enrichment)
+    const sourcePaths: string[] = [];
     let textLayer: string | undefined;
-    if (isPdf) {
-      const text = await extractPdfText(data);
-      if (text) textLayer = text;
-    }
+    let extractInput: ExtractInput;
 
-    // Vision: first extraction
-    const extractInput: ExtractInput = isPdf
-      ? { kind: "pdf", mediaType: ACCEPTED_PDF_TYPE, data, textLayer }
-      : { kind: "image", mediaType, data };
+    if (hasPdf) {
+      // Single-PDF path. Stored at the legacy single-source location.
+      const pdfFile = normalized[0];
+      const sourceKey = `sources/${agreementId}.pdf`;
+      await storage.put(sourceKey, pdfFile.data);
+      sourcePaths.push(sourceKey);
+
+      const text = await extractPdfText(pdfFile.data);
+      if (text) textLayer = text;
+
+      extractInput = {
+        kind: "pdf",
+        mediaType: ACCEPTED_PDF_TYPE,
+        data: pdfFile.data,
+        textLayer,
+      };
+    } else {
+      // 1..N image pages. Always stored under sources/{agreementId}/page-{N}.{ext}
+      // even when N=1 — keeps the path scheme uniform for new uploads.
+      const pages: ImagePage[] = [];
+      for (let i = 0; i < normalized.length; i++) {
+        const f = normalized[i];
+        const ext = f.mediaType.split("/")[1] ?? "bin";
+        const key = `sources/${agreementId}/page-${i + 1}.${ext}`;
+        await storage.put(key, f.data);
+        sourcePaths.push(key);
+        pages.push({ mediaType: f.mediaType, data: f.data });
+      }
+      extractInput = { kind: "image", pages };
+    }
 
     const firstPass = await extractAgreement(extractInput);
     const verified = await verifyExtraction(extractInput, firstPass);
-
     const workflowSteps = deriveDefaultWorkflow(verified.schema);
 
     const db = getDb();
@@ -87,8 +130,9 @@ export async function POST(request: NextRequest) {
       id: agreementId,
       shortId,
       title: verified.schema.title || "Untitled agreement",
-      sourceKind: isPdf ? "pdf" : "image",
-      sourcePath: sourceKey,
+      sourceKind: hasPdf ? "pdf" : "image",
+      sourcePath: sourcePaths[0],
+      sourcePathsJson: sourcePaths,
       schemaJson: verified.schema,
       styleFingerprintJson: verified.styleFingerprint,
       lowConfidenceFieldsJson: verified.lowConfidenceFieldIds,
@@ -103,6 +147,8 @@ export async function POST(request: NextRequest) {
       styleFingerprint: verified.styleFingerprint,
       lowConfidenceFieldIds: verified.lowConfidenceFieldIds,
       workflowSteps,
+      sourcePaths,
+      pageCount: sourcePaths.length,
       elapsedMs: Date.now() - started,
     });
   } catch (err) {
