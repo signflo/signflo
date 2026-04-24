@@ -60,7 +60,20 @@ const SYSTEM_PROMPT = `You are Signflo's document-reproduction agent. Given a sc
    \`\`\`
    Wrap each source page's content in \`<section class="signflo-page" data-source-page="{N}">...</section>\`. Source page count must equal rendered page count.
 
-8. **Page size and margins from the fingerprint.** Use \`@page { size: <pageSize> <orientation>; margin: <margins>; }\` to honor the source's physical dimensions.
+8. **Page size and margins — BOTH screen and print.** Margins must be visible in a browser preview AND in a PDF print. \`@page\` only affects print/PDF, so you MUST mirror the margin as container padding for the screen view:
+
+\`\`\`css
+@page { size: <pageSize> <orientation>; margin: 0; }
+.signflo-page {
+  padding: <margins>;  /* e.g. 0.75in or 48pt — matches the source */
+  box-sizing: border-box;
+  max-width: <pageWidth>;  /* e.g. 8.5in for letter */
+  margin: 0 auto;           /* center on screen */
+  background: <palette.background>;
+}
+\`\`\`
+
+Setting \`@page margin: 0\` and putting all the real margin on \`.signflo-page\` padding means screen and print look identical. Do NOT put margin on both or they'll double-apply. ALWAYS wrap page content in \`<section class="signflo-page">\` — even for single-page documents.
 
 ## Output shape
 

@@ -56,6 +56,7 @@ export default async function PreviewPage({ params }: PageProps) {
     templateCss: agreement.templateCss,
     fontImports: agreement.fontImports,
     agreementId: agreement.id,
+    logoAvailable: agreement.logoPath !== null,
   });
 
   return (
@@ -134,18 +135,22 @@ interface ComposeArgs {
   templateCss: string | null;
   fontImports: string[];
   agreementId: string;
+  /** False when logo extraction soft-failed; hide logo imgs to avoid broken-image icons. */
+  logoAvailable: boolean;
 }
 
 /**
- * Inject font imports + templateCss into the template's <head>, and
- * substitute the agreementId placeholder for logo references. Returns
- * the final HTML to drop into the iframe's srcDoc.
+ * Inject font imports + templateCss into the template's <head>, substitute
+ * the agreementId placeholder for logo references, and hide logo images
+ * when extraction soft-failed. Returns the final HTML for the iframe's
+ * srcDoc.
  */
 function composeRenderedHtml({
   templateHtml,
   templateCss,
   fontImports,
   agreementId,
+  logoAvailable,
 }: ComposeArgs): string {
   const fontLinks = fontImports
     .map(
@@ -156,7 +161,14 @@ function composeRenderedHtml({
   const cssBlock = templateCss
     ? `<style data-signflo-template-css>\n${templateCss}\n</style>`
     : "";
-  const injection = `${fontLinks}\n${cssBlock}`;
+  // When logo extraction soft-failed, hide any img referencing logo.png and
+  // any element Opus may have specifically styled as a logo container. The
+  // document header still carries brand identity via the primary color and
+  // (per the prompt) the header text.
+  const logoHideCss = logoAvailable
+    ? ""
+    : `<style data-signflo-logo-hide>\nimg[src*="logo.png"] { display: none !important; }\n.logo, .brand-logo, [data-logo] { display: none !important; }\n</style>`;
+  const injection = `${fontLinks}\n${cssBlock}\n${logoHideCss}`;
 
   let html = templateHtml.replace(
     /\{\{AGREEMENT_ID_PLACEHOLDER\}\}/g,

@@ -151,7 +151,11 @@ export async function POST(request: NextRequest) {
     let logoPath: string | null = null;
     if (verified.styleFingerprint?.layout?.logoPresent) {
       try {
-        logoPath = await extractLogo(agreementId, extractInput);
+        logoPath = await extractLogo(
+          agreementId,
+          extractInput,
+          verified.styleFingerprint,
+        );
       } catch (logoErr) {
         console.error("[api/ingest] logo extraction soft-failed:", logoErr);
       }

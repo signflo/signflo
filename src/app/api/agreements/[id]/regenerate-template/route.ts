@@ -49,10 +49,18 @@ export async function POST(_req: NextRequest, { params }: RouteParams) {
       extractInput,
     );
 
-    let logoPath: string | null = agreement.logoPath;
-    if (agreement.styleFingerprint.layout?.logoPresent && !logoPath) {
+    // Always re-attempt the logo crop on regenerate. The caller pushed this
+    // button because something was wrong — trust the new result fully,
+    // including when it's null (self-critique rejected the crop). A missing
+    // logo is better than a visibly-wrong one.
+    let logoPath: string | null = null;
+    if (agreement.styleFingerprint.layout?.logoPresent) {
       try {
-        logoPath = await extractLogo(agreement.id, extractInput);
+        logoPath = await extractLogo(
+          agreement.id,
+          extractInput,
+          agreement.styleFingerprint,
+        );
       } catch (logoErr) {
         console.error(
           "[api/agreements/regenerate-template] logo extraction soft-failed:",

@@ -5,9 +5,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Serve files from LocalStorage. Gated to `sources/` and `submissions/` prefixes so
- * the endpoint can't be used to escape the uploads dir via crafted keys (LocalStorage
- * already strips `..` and leading slashes, but belt-and-suspenders).
+ * Serve files from LocalStorage. Gated to `sources/`, `submissions/`, and
+ * `agreements/` prefixes so the endpoint can't be used to escape the uploads
+ * dir via crafted keys (LocalStorage already strips `..` and leading slashes,
+ * but belt-and-suspenders). `agreements/` holds Phase D.1 logo crops.
  */
 export async function GET(
   _request: NextRequest,
@@ -16,7 +17,11 @@ export async function GET(
   const { key: parts } = await context.params;
   const key = parts.join("/");
 
-  if (!key.startsWith("sources/") && !key.startsWith("submissions/")) {
+  if (
+    !key.startsWith("sources/") &&
+    !key.startsWith("submissions/") &&
+    !key.startsWith("agreements/")
+  ) {
     return new Response("Not found", { status: 404 });
   }
 
