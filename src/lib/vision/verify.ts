@@ -35,6 +35,21 @@ If any signature block is missing \`signerRole\`, add it:
 
 Use document context to pick. If the block is clearly already signed in the source image (e.g. a signature line with a printed signature above it), mark "pre-signed".
 
+## 4b. Re-attribute notary / official / vendor fields with \`filledByRole\`
+
+Walk the prior extraction's fields. For any field that the prior pass left as default (filledByRole undefined / "self") but is clearly filled by a non-self party in the source, set \`filledByRole\` to the correct role:
+
+- Notary appearance line, notary date, notary commission expiration → \`"counterparty"\`
+- Recording / clerk fields (file number, record date, deputy signature line) → \`"counterparty"\`
+- Vendor rep name, employee number, branch ID on a customer-facing form → \`"counterparty"\`
+- Pre-printed customer data we decided to keep as a field → \`"pre-signed"\`
+
+Test: if the field's blank sits adjacent to a counterparty signature block, it's almost always filled by that counterparty.
+
+## 4c. Section assignment for renderer grouping
+
+If the prior pass omitted \`section\` on fields and the source document visibly groups them (named panels, headers, or framed regions), assign sections. Use the SAME exact string for fields in the same group. Keep section names short and reusable. Forms with ≤8 fields can omit sections entirely.
+
 ## 5. Correct errors on real fields
 
 - Fields that were missed entirely (visibly present in the source but not captured).
