@@ -70,15 +70,29 @@ export function FormRenderer({
   initialValues,
 }: Props) {
   const {
-    register,
+    register: rawRegister,
     handleSubmit,
     watch,
     setError,
+    clearErrors,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     mode: "onBlur",
     defaultValues: mergeDefaults(schema, initialValues),
   });
+
+  // Wrap register so any user edit clears that field's prior server error.
+  // Without this, a field that was setError'd on a failed submit keeps its
+  // error indicator until the next submit cycle even if the user has already
+  // fixed it.
+  const register: typeof rawRegister = (name, options) =>
+    rawRegister(name, {
+      ...options,
+      onChange: (e) => {
+        clearErrors(name as Parameters<typeof clearErrors>[0]);
+        return options?.onChange?.(e);
+      },
+    });
 
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [pauseAutoSave, setPauseAutoSave] = useState(false);
@@ -192,7 +206,19 @@ export function FormRenderer({
   const sectioned = groupFieldsBySection(schema.fields);
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6" noValidate>
+    <form
+      onSubmit={(e) => {
+        // Clear stale server errors so the resubmit isn't a silent no-op.
+        // react-hook-form's handleSubmit gates on formState.errors, and
+        // setError-set errors don't auto-clear without an explicit
+        // clearErrors call. We clear all up front; the server returns the
+        // still-failing fields again if needed.
+        clearErrors();
+        return handleSubmit(onSubmit)(e);
+      }}
+      className="space-y-6"
+      noValidate
+    >
       {showLowConfBanner && (
         <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-4 text-sm">
           <div className="font-medium mb-1">Source quality flagged</div>
