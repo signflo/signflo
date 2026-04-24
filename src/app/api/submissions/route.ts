@@ -9,6 +9,7 @@ import type { Storage as StorageIface } from "@/lib/storage";
 import { canTransition, advanceStep, startTransition } from "@/lib/workflow/transition";
 import { WORKFLOW_COMPLETE, type WorkflowTransition } from "@/lib/workflow/types";
 import { mintSubmissionToken } from "@/lib/tokens/queries";
+import { eq } from "drizzle-orm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,6 +26,9 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const agreementId = formData.get("agreementId");
+    const draftTokenRaw = formData.get("draftToken");
+    const draftToken =
+      typeof draftTokenRaw === "string" && draftTokenRaw.length > 0 ? draftTokenRaw : null;
 
     if (typeof agreementId !== "string") {
       return Response.json({ error: "Missing agreementId" }, { status: 400 });
@@ -35,7 +39,49 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: "Agreement not found" }, { status: 404 });
     }
 
-    const submissionId = nanoid();
+    // Resolve the submission id — if a draftToken is supplied, update in place
+    // (same submission, same token, status transitions draft → submitted).
+    // Otherwise mint a fresh submission id.
+    const db = getDb();
+    let submissionId: string;
+    let isResumingDraft = false;
+    if (draftToken) {
+      const tokenRows = await db
+        .select()
+        .from(schema.submissionTokens)
+        .where(eq(schema.submissionTokens.token, draftToken))
+        .limit(1);
+      const tokenRow = tokenRows[0];
+      if (!tokenRow) {
+        return Response.json({ error: "Draft token not found" }, { status: 404 });
+      }
+      const subRows = await db
+        .select()
+        .from(schema.submissions)
+        .where(eq(schema.submissions.id, tokenRow.submissionId))
+        .limit(1);
+      const subRow = subRows[0];
+      if (!subRow) {
+        return Response.json({ error: "Draft submission not found" }, { status: 404 });
+      }
+      if (subRow.agreementId !== agreement.id) {
+        return Response.json(
+          { error: "Draft belongs to a different agreement" },
+          { status: 400 },
+        );
+      }
+      if (subRow.status !== "draft") {
+        return Response.json(
+          { error: "Submission is no longer a draft" },
+          { status: 409 },
+        );
+      }
+      submissionId = subRow.id;
+      isResumingDraft = true;
+    } else {
+      submissionId = nanoid();
+    }
+
     const storage = getStorage();
     const data: Record<string, FieldData> = {};
 
@@ -121,7 +167,48 @@ export async function POST(request: NextRequest) {
     }
 
     const now = new Date();
-    const db = getDb();
+
+    if (isResumingDraft && draftToken) {
+      // Draft → submitted transition. Reuse the draft row + its existing
+      // token. History gets the additional advance / start entries recorded
+      // above; we merge with whatever history already existed on the draft.
+      const existingRows = await db
+        .select()
+        .from(schema.submissions)
+        .where(eq(schema.submissions.id, submissionId))
+        .limit(1);
+      const existing = existingRows[0];
+      const existingHistory =
+        (existing?.historyJson as WorkflowTransition[] | null) ?? [];
+      // Drop the "start" entry we built up above since the draft already
+      // had one; keep any advance/complete entry we just produced.
+      const newEntries = history.filter((h) => h.action !== "start");
+      const mergedHistory = [...existingHistory, ...newEntries];
+
+      await db
+        .update(schema.submissions)
+        .set({
+          dataJson: data,
+          status: "submitted",
+          currentStepIndex,
+          historyJson: mergedHistory,
+          submittedAt: now,
+        })
+        .where(eq(schema.submissions.id, submissionId));
+
+      return Response.json({
+        submissionId,
+        submissionShortId: submissionId,
+        status: "submitted",
+        currentStepIndex,
+        isComplete,
+        missingFieldIds,
+        missingSignatureBlockIds,
+        ownerUrl: `/s/${draftToken}`,
+      });
+    }
+
+    // Brand-new submission path — insert + mint a fresh token.
     await db.insert(schema.submissions).values({
       id: submissionId,
       agreementId: agreement.id,

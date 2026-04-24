@@ -8,12 +8,17 @@ import type {
   FieldGroup,
   SignatureBlock,
 } from "@/lib/vision/types";
+import { useDraftSave, type DraftSaveStatus } from "./useDraftSave";
 
 interface Props {
   agreementId: string;
   shortId: string;
   schema: AgreementSchema;
   lowConfidenceFieldIds?: string[];
+  /** When rendering a resumed draft, the token identifying it. */
+  initialDraftToken?: string;
+  /** Pre-filled values from a saved draft (keyed by form-field name). */
+  initialValues?: Record<string, unknown>;
 }
 
 type FormValues = Record<string, string | boolean>;
@@ -26,24 +31,48 @@ function groupFieldName(groupId: string, instance: number, fieldId: string) {
   return `${groupId}__${instance}__${fieldId}`;
 }
 
-export function FormRenderer({ agreementId, shortId, schema, lowConfidenceFieldIds = [] }: Props) {
+export function FormRenderer({
+  agreementId,
+  shortId,
+  schema,
+  lowConfidenceFieldIds = [],
+  initialDraftToken,
+  initialValues,
+}: Props) {
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     mode: "onBlur",
-    defaultValues: buildDefaults(schema),
+    defaultValues: mergeDefaults(schema, initialValues),
   });
 
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [pauseAutoSave, setPauseAutoSave] = useState(false);
   const lowConfSet = new Set(lowConfidenceFieldIds);
+
+  // Watch all form values so useDraftSave can debounce-save them.
+  const watchedValues = watch();
+  const draftSave = useDraftSave({
+    agreementId,
+    initialDraftToken: initialDraftToken ?? null,
+    data: watchedValues as Record<string, unknown>,
+    paused: pauseAutoSave || isSubmitting,
+  });
 
   const onSubmit: SubmitHandler<FormValues> = async (values) => {
     setSubmitError(null);
+    // Stop auto-save during and after final submit so we don't race the
+    // POST to /api/submissions with a POST to /api/drafts.
+    setPauseAutoSave(true);
 
     const fd = new FormData();
     fd.append("agreementId", agreementId);
+    if (draftSave.draftToken) {
+      fd.append("draftToken", draftSave.draftToken);
+    }
 
     for (const field of schema.fields) {
       appendFieldValue(fd, field, field.id, values);
@@ -107,6 +136,14 @@ export function FormRenderer({ agreementId, shortId, schema, lowConfidenceFieldI
           <pre className="whitespace-pre-wrap text-xs">{submitError}</pre>
         </div>
       )}
+
+      <div className="flex items-center justify-between pt-2">
+        <DraftSaveIndicator
+          status={draftSave.status}
+          lastSavedAt={draftSave.lastSavedAt}
+          lastError={draftSave.lastError}
+        />
+      </div>
 
       <button
         type="submit"
@@ -251,6 +288,58 @@ function buildDefaults(schema: AgreementSchema): FormValues {
     }
   }
   return out;
+}
+
+/**
+ * Merge schema defaults with persisted draft values (if any). Draft values
+ * override defaults; unrecognized keys from the draft are dropped so we
+ * never render stale fields from an outdated schema.
+ */
+function mergeDefaults(
+  schema: AgreementSchema,
+  initialValues: Record<string, unknown> | undefined,
+): FormValues {
+  const defaults = buildDefaults(schema);
+  if (!initialValues) return defaults;
+  const merged: FormValues = { ...defaults };
+  for (const key of Object.keys(defaults)) {
+    const raw = initialValues[key];
+    if (raw === undefined || raw === null) continue;
+    if (typeof raw === "boolean") merged[key] = raw;
+    else if (typeof raw === "string") merged[key] = raw;
+    else if (typeof raw === "number") merged[key] = String(raw);
+    // File-type "object" shapes are not restored into the form — they're
+    // only persisted on final submit.
+  }
+  return merged;
+}
+
+function DraftSaveIndicator({
+  status,
+  lastSavedAt,
+  lastError,
+}: {
+  status: DraftSaveStatus;
+  lastSavedAt: Date | null;
+  lastError: string | null;
+}) {
+  const fmt = (d: Date) =>
+    new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(d);
+
+  if (status === "saving") {
+    return <span className="text-xs text-neutral-500">Saving…</span>;
+  }
+  if (status === "saved" && lastSavedAt) {
+    return <span className="text-xs text-neutral-500">Saved at {fmt(lastSavedAt)}</span>;
+  }
+  if (status === "error") {
+    return (
+      <span className="text-xs text-red-700" title={lastError ?? undefined}>
+        Save failed — retrying on next edit
+      </span>
+    );
+  }
+  return null;
 }
 
 interface FieldControlProps {
