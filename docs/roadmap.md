@@ -88,6 +88,7 @@ Everything that sets downstream phases up for quality. No user-facing features b
 
 - Signature capture with `signature_pad` — mobile-first, canvas → PNG.
 - `signerRole` honored: `"self"` → capture signature; `"pre-signed"` → static "Already signed by: {party}"; `"counterparty"` → disabled, pending their turn.
+- **Two signature container patterns to handle** (validation log issue #3): top-level `signatureBlocks` (most docs) AND `type: "signature"` fields nested inside FieldGroup templates (e.g. one signature line per owner row in a DBA Certificate of Ownership). The capture UI must work for both shapes.
 - Signed PDF generation: second Puppeteer pass with signature image embedded at the correct coordinates.
 - Signed-at timestamp + post-sign hash stored with submission.
 

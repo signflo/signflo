@@ -31,6 +31,36 @@ function groupFieldName(groupId: string, instance: number, fieldId: string) {
   return `${groupId}__${instance}__${fieldId}`;
 }
 
+/**
+ * Split flat fields into a leading bucket of section-less fields and an
+ * ordered list of `{section, fields}` groupings. Section order follows
+ * first-appearance in the schema's field array — preserves authorial intent
+ * for documents like TruGreen where the section order matters semantically.
+ */
+function groupFieldsBySection(fields: AgreementField[]) {
+  const flat: AgreementField[] = [];
+  const sectionOrder: string[] = [];
+  const bySectionMap = new Map<string, AgreementField[]>();
+  for (const f of fields) {
+    if (!f.section) {
+      flat.push(f);
+      continue;
+    }
+    if (!bySectionMap.has(f.section)) {
+      sectionOrder.push(f.section);
+      bySectionMap.set(f.section, []);
+    }
+    bySectionMap.get(f.section)!.push(f);
+  }
+  return {
+    flat,
+    bySection: sectionOrder.map((section) => ({
+      section,
+      fields: bySectionMap.get(section)!,
+    })),
+  };
+}
+
 export function FormRenderer({
   agreementId,
   shortId,
@@ -103,17 +133,63 @@ export function FormRenderer({
     window.location.href = target;
   };
 
+  // If most fields are low-confidence, show a single banner at the top
+  // and suppress per-field amber badges (which would otherwise read as
+  // "everything's wrong" on a poorly-photographed source).
+  const totalFieldCount =
+    schema.fields.length +
+    schema.fieldGroups.reduce((s, g) => s + g.template.length * g.initialInstances, 0);
+  const showLowConfBanner =
+    totalFieldCount > 0 && lowConfidenceFieldIds.length / totalFieldCount > 0.5;
+  const effectiveLowConfSet = showLowConfBanner ? new Set<string>() : lowConfSet;
+
+  // Group flat fields by their `section` (if any) so the renderer can show
+  // h2 headings between sections. Fields without a section land in a
+  // leading "no-section" bucket and render as before.
+  const sectioned = groupFieldsBySection(schema.fields);
+
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6" noValidate>
-      {schema.fields.map((field) => (
+      {showLowConfBanner && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-4 text-sm">
+          <div className="font-medium mb-1">Source quality flagged</div>
+          <p>
+            This document was extracted from a low-quality source ({lowConfidenceFieldIds.length}
+            {" "}of {totalFieldCount} fields below the confidence threshold). Please verify
+            each value carefully as you fill.
+          </p>
+        </div>
+      )}
+
+      {sectioned.flat.map((field) => (
         <FieldControl
           key={field.id}
           field={field}
           name={field.id}
           register={register}
           errorMessage={(errors[field.id]?.message as string) ?? undefined}
-          flaggedLowConfidence={lowConfSet.has(field.id)}
+          flaggedLowConfidence={effectiveLowConfSet.has(field.id)}
         />
+      ))}
+
+      {sectioned.bySection.map(({ section, fields }) => (
+        <section key={section} className="pt-4 border-t border-neutral-200">
+          <h2 className="text-sm font-semibold text-neutral-700 uppercase tracking-wide mb-4">
+            {section}
+          </h2>
+          <div className="space-y-6">
+            {fields.map((field) => (
+              <FieldControl
+                key={field.id}
+                field={field}
+                name={field.id}
+                register={register}
+                errorMessage={(errors[field.id]?.message as string) ?? undefined}
+                flaggedLowConfidence={effectiveLowConfSet.has(field.id)}
+              />
+            ))}
+          </div>
+        </section>
       ))}
 
       {schema.fieldGroups.map((group) => (
@@ -122,7 +198,7 @@ export function FormRenderer({
           group={group}
           register={register}
           errors={errors}
-          lowConfSet={lowConfSet}
+          lowConfSet={effectiveLowConfSet}
         />
       ))}
 

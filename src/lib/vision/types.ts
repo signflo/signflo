@@ -29,6 +29,20 @@ export interface AgreementField {
   positionHint?: { page: number; x: number; y: number; w: number; h: number };
   /** Opus's self-reported confidence, 0–1 */
   confidence: number;
+  /**
+   * Optional grouping label for visual sectioning in the renderer (e.g.
+   * "Contact Info", "Payment", "Specialized Services"). Different concept
+   * from FieldGroup — sections are display-only headings, not repeating
+   * templates. Null/undefined fields render standalone.
+   */
+  section?: string;
+  /**
+   * Which workflow step's role is responsible for filling this field.
+   * Defaults to "self" if omitted. Use this to mark notary-, clerk-, or
+   * counterparty-filled fields (e.g. "Before me, the undersigned authority,
+   * personally appeared ___" is filled by the notary, not the filer).
+   */
+  filledByRole?: SignerRole;
 }
 
 /**
@@ -36,6 +50,11 @@ export interface AgreementField {
  * has {street, city, state, zip}. Grouped fields live ONLY inside
  * `FieldGroup.template` — they do NOT also appear in `AgreementSchema.fields[]`.
  * The renderer iterates both `fields` and `fieldGroups`.
+ *
+ * Note for Phase E (signature capture): a FieldGroup template can include
+ * `type: "signature"` fields (e.g. one signature line per owner row in a DBA).
+ * These are distinct from top-level `signatureBlocks` — the capture UI must
+ * handle both patterns. See docs/phase-c-validation-log.md issue #3.
  */
 export interface FieldGroup {
   id: string;

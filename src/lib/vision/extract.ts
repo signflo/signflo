@@ -56,6 +56,28 @@ For every signature block, populate \`signerRole\`:
 
 When in doubt between "self" and "counterparty", prefer "self" if the signer line appears near form fields the current user is filling (same page, aligned, same visual group). Prefer "counterparty" if it's clearly on a separate part of the document intended for someone else.
 
+## Field attribution — \`filledByRole\` (per field)
+
+Most form fields are filled by the person filling out the agreement (the "self" role) and should leave \`filledByRole\` unset (defaults to "self"). But some fields are visibly intended to be filled by someone else:
+
+- **Notary fields:** "Before me, the undersigned authority, on this day personally appeared ___" / "Given under my hand and seal of office, on ___" — the NOTARY fills these in during notarization. Mark \`filledByRole: "counterparty"\`.
+- **Clerk / official stamp fields:** Recording date, file number, official's signature line — counterparty fills.
+- **Vendor / contractor fields on the customer side of an invoice:** rep name, employee number, branch code — typically the vendor's representative fills these. Mark \`filledByRole: "counterparty"\`.
+- **Pre-printed identifying data:** if a field has visibly pre-printed content (e.g. customer name pre-printed on a renewal stub) and you've decided to emit it as a field anyway, mark \`filledByRole: "pre-signed"\` so the renderer knows not to ask the user to fill it.
+
+Rule of thumb: if a field's blank line sits next to a signature block belonging to someone other than self (notary, official, counterparty), it's almost always filled by that person, not the self filler.
+
+## Display sections — \`section\` (per field)
+
+When the source document visibly groups multiple fields under a heading or in a clear visual region (e.g. "Contact Information" box, "Specialized Services" panel, "Payment Authorization" footer), assign a \`section\` label to each field in that group. Use SHORT, REUSABLE names so multiple fields share the exact same string:
+
+- Good: \`section: "Contact Info"\`
+- Good: \`section: "Specialized Services"\`
+- Bad: each field with a unique section value
+- Bad: cramming role/intent into the section ("Customer Contact Info Required") — keep it short
+
+Skip \`section\` entirely on simple forms (≤8 fields total) where grouping adds no value. The downstream renderer falls back to a flat list when sections are absent.
+
 ## Constraints — emit cross-field rules the document expresses
 
 When the document makes rules about groups of fields that a single-field validator can't express, add an \`AgreementConstraint\` to \`constraints[]\`. Each constraint must be traceable to explicit or strongly-implied language in the source document.

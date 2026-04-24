@@ -50,6 +50,17 @@ const fieldSchema = {
       description:
         "Required for 'radio' and 'select' types — the collapsed list of mutually-exclusive choices. Use this when you see a group of checkboxes that are logically mutually exclusive (e.g. payment options, inspection periods): emit ONE field of type 'radio' with the choices in this array, rather than N separate checkbox fields.",
     },
+    section: {
+      type: "string",
+      description:
+        "Optional grouping label for visual sectioning in the renderer (e.g. 'Contact Info', 'Service Address', 'Specialized Services', 'Payment'). Different from FieldGroup — sections are display-only headings, not repeating templates. Use a section name when the source document visibly groups N fields under a heading or visual region. Use a SHORT, REUSABLE name so multiple fields share it. Omit for forms small enough that grouping adds no value (≤8 fields total).",
+    },
+    filledByRole: {
+      type: "string",
+      enum: ["self", "co-signer", "counterparty", "pre-signed"],
+      description:
+        "Which role fills this field. Defaults to 'self' if omitted. Use 'counterparty' for fields that are visibly filled by an opposing party / official (e.g. notary's appearance line, county clerk's stamp date, vendor's invoice number). Use 'pre-signed' for fields already populated on the source document. This drives workflow step assignment.",
+    },
     positionHint: positionHintSchema,
     confidence: { type: "number", minimum: 0, maximum: 1 },
   },
