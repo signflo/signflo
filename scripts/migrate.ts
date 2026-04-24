@@ -97,6 +97,27 @@ const additiveColumns: Array<{ table: string; column: string; ddl: string }> = [
     column: "source_paths_json",
     ddl: `ALTER TABLE agreements ADD COLUMN source_paths_json TEXT`,
   },
+  // Phase D.1 — rendering contract
+  {
+    table: "agreements",
+    column: "template_html",
+    ddl: `ALTER TABLE agreements ADD COLUMN template_html TEXT`,
+  },
+  {
+    table: "agreements",
+    column: "template_css",
+    ddl: `ALTER TABLE agreements ADD COLUMN template_css TEXT`,
+  },
+  {
+    table: "agreements",
+    column: "font_imports_json",
+    ddl: `ALTER TABLE agreements ADD COLUMN font_imports_json TEXT`,
+  },
+  {
+    table: "agreements",
+    column: "logo_path",
+    ddl: `ALTER TABLE agreements ADD COLUMN logo_path TEXT`,
+  },
 ];
 
 for (const m of additiveColumns) {

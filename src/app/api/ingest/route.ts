@@ -4,6 +4,8 @@ import { getDb, schema } from "@/lib/db";
 import { getStorage } from "@/lib/storage";
 import { extractAgreement, type ExtractInput, type ImagePage } from "@/lib/vision/extract";
 import { verifyExtraction } from "@/lib/vision/verify";
+import { generateAgreementTemplate } from "@/lib/vision/template";
+import { extractLogo } from "@/lib/vision/logo-crop";
 import { extractPdfText } from "@/lib/pdf/ingest";
 import { deriveDefaultWorkflow } from "@/lib/workflow/derive";
 
@@ -125,6 +127,36 @@ export async function POST(request: NextRequest) {
     const verified = await verifyExtraction(extractInput, firstPass);
     const workflowSteps = deriveDefaultWorkflow(verified.schema);
 
+    // Phase D.1 — soft-fail template generation. The schema is the load-bearing
+    // value; if Opus fails to produce a renderable template, the agreement still
+    // persists and /a/{shortId}/preview surfaces a Retry button.
+    let templateHtml: string | null = null;
+    let templateCss: string | null = null;
+    let fontImports: string[] = [];
+    try {
+      const template = await generateAgreementTemplate(
+        verified.schema,
+        verified.styleFingerprint,
+        extractInput,
+      );
+      templateHtml = template.templateHtml;
+      templateCss = template.templateCss;
+      fontImports = template.fontImports;
+    } catch (templateErr) {
+      console.error("[api/ingest] template generation soft-failed:", templateErr);
+    }
+
+    // Phase D.1 — soft-fail logo extraction. Runs only when fingerprint reports
+    // a logo and the source is image-based (PDF rasterization isn't in D.1).
+    let logoPath: string | null = null;
+    if (verified.styleFingerprint?.layout?.logoPresent) {
+      try {
+        logoPath = await extractLogo(agreementId, extractInput);
+      } catch (logoErr) {
+        console.error("[api/ingest] logo extraction soft-failed:", logoErr);
+      }
+    }
+
     const db = getDb();
     await db.insert(schema.agreements).values({
       id: agreementId,
@@ -137,6 +169,10 @@ export async function POST(request: NextRequest) {
       styleFingerprintJson: verified.styleFingerprint,
       lowConfidenceFieldsJson: verified.lowConfidenceFieldIds,
       workflowStepsJson: workflowSteps,
+      templateHtml,
+      templateCss,
+      fontImportsJson: fontImports,
+      logoPath,
       createdAt: new Date(),
     });
 
@@ -149,6 +185,8 @@ export async function POST(request: NextRequest) {
       workflowSteps,
       sourcePaths,
       pageCount: sourcePaths.length,
+      templateGenerated: templateHtml !== null,
+      logoExtracted: logoPath !== null,
       elapsedMs: Date.now() - started,
     });
   } catch (err) {

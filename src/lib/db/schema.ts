@@ -24,6 +24,23 @@ export const agreements = sqliteTable("agreements", {
   lowConfidenceFieldsJson: text("low_confidence_fields_json", { mode: "json" }),
   /** Ordered array of WorkflowStep (src/lib/workflow/types.ts). Nullable for pre-migration rows. */
   workflowStepsJson: text("workflow_steps_json", { mode: "json" }),
+  /**
+   * Phase D.1 — Opus-generated HTML template mirroring the source document.
+   * Complete <!DOCTYPE html> document with [data-field] placeholders for
+   * per-submission value injection. NULL when generation soft-fails or
+   * predates Phase D.
+   */
+  templateHtml: text("template_html"),
+  /** Phase D.1 — CSS for the generated template, injected into <head>. */
+  templateCss: text("template_css"),
+  /** Phase D.1 — Ordered array of Google Fonts URLs to load in the template. */
+  fontImportsJson: text("font_imports_json", { mode: "json" }),
+  /**
+   * Phase D.1 — Storage path to the cropped logo image (e.g.
+   * agreements/{id}/logo.png). NULL when logoPresent=false or the crop
+   * soft-failed.
+   */
+  logoPath: text("logo_path"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
 

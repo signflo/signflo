@@ -26,6 +26,14 @@ export interface AgreementRecord {
   lowConfidenceFieldIds: string[];
   /** Workflow steps persisted at ingest time. Derived on the fly for pre-migration rows. */
   workflowSteps: WorkflowStep[];
+  /** Phase D.1 — Opus-generated HTML template; NULL when generation soft-failed or row predates Phase D. */
+  templateHtml: string | null;
+  /** Phase D.1 — CSS for the generated template. */
+  templateCss: string | null;
+  /** Phase D.1 — Google Fonts URLs to <link> in the rendered template. */
+  fontImports: string[];
+  /** Phase D.1 — Storage path to the cropped logo image; NULL when absent. */
+  logoPath: string | null;
   createdAt: Date;
 }
 
@@ -80,6 +88,10 @@ function rowToRecord(row: typeof schema.agreements.$inferSelect): AgreementRecor
     styleFingerprint: (row.styleFingerprintJson ?? null) as StyleFingerprint | null,
     lowConfidenceFieldIds: (row.lowConfidenceFieldsJson ?? []) as string[],
     workflowSteps,
+    templateHtml: row.templateHtml ?? null,
+    templateCss: row.templateCss ?? null,
+    fontImports: (row.fontImportsJson ?? []) as string[],
+    logoPath: row.logoPath ?? null,
     createdAt: row.createdAt,
   };
 }
