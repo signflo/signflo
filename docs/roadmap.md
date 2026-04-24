@@ -1,7 +1,7 @@
 # Signflo — roadmap
 
-**Last updated:** 2026-04-23
-**Status:** Phase A + Phase B (light) shipped. Phase C (foundations) active.
+**Last updated:** 2026-04-24
+**Status:** Phases A, B (light), and C all shipped (PRs #1–#10 merged). Phase D next — rendering + style-matched form UI + high-fidelity PDF.
 
 ## Framing
 
@@ -38,43 +38,46 @@ Phases are grouped by logical dependency, not calendar date. Completion criteria
 - `/api/storage/[...key]` GET endpoint, prefix-gated to `sources/` and `submissions/`
 - Decisions captured in `docs/phase-b-decisions.md` (David's review annotations preserved)
 
-### 🟡 Phase C — Foundation upgrades (active)
+### ✅ Phase C — Foundation upgrades (shipped, PRs #3–#10)
 
-Everything that sets downstream phases up for quality. No user-facing features beyond what Phase B light ships.
+Foundation pass that sets downstream phases up for quality. Four sub-phases + two cleanup PRs delivered end-to-end:
 
-**1. `AgreementSchema` upgrades**
-- `fieldGroups`: repeating templates with N instances. Enables clean rendering of multi-row patterns (the 5-row shipping address) and informs the rendered PDF.
-- `radioGroups`: explicit mutual-exclusivity emitted by Opus instead of checkbox-plus-workflow-hint inference. Addresses the pattern seen in Reliable Ducts payment options and Florida Pest Control.
-- `signerRole: "self" | "counterparty" | "pre-signed"` on `SignatureBlock`. Disambiguates manufacturer pre-signatures (Carry-On MCO) from signer blocks that need filling.
-- `constraints` array: cross-field rules (`one-of`, `at-least-n`, `matches-pattern`) expressed in the schema, feeding workflow-completeness in later phases.
+**✅ C.1 — `AgreementSchema` upgrades (PR #4)**
+- `fieldGroups`: repeating templates with N instances. Cleanly renders multi-row patterns like the 5-row shipping address; informs downstream PDF rendering.
+- `signerRole: "self" | "co-signer" | "counterparty" | "pre-signed"` on `SignatureBlock`. Disambiguates manufacturer pre-signatures (Carry-On MCO) from signer blocks that need filling.
+- `constraints` array (discriminated union of `one-of` / `at-least-n` / `all-or-none`): cross-field rules expressed in the schema. **Service Contract validation surfaced 5 correct constraints on first ingest.**
+- Radio-vs-checkbox: prompt teaches Opus to emit `type: "radio"` with collapsed `options[]` instead of N checkboxes + a "mutually exclusive" workflow hint. No new `radioGroups` concept needed.
+- Defensive `parseExtractionResult()` for Opus tool-call drift (handles the "double-wrap" regression we saw mid-spike).
+- Re-spike against 3 diagnostic documents confirmed behavior.
 
-**2. Extraction prompt + tool schema update**
-- Teach Opus to emit the new shapes via updated tool schema + prompt guidance.
-- Re-run the 8-document test corpus against the upgraded schema; confirm quality holds; record deltas in `docs/vision-spike.md`.
+**✅ C.2 — Workflow state model (PR #5)**
+- `agreements.workflow_steps_json`: ordered step sequence per role.
+- `submissions.current_step_index` + `submissions.history_json`: transitions with timestamps.
+- `deriveDefaultWorkflow()` generates one step per non-pre-signed role; `canTransition()` + `advanceStep()` + `reworkTransition()` helpers.
+- Data model supports multi-party routing (Party A → Party B → signed) + rework loops, though MVP only exercises single self-sign.
+- Submissions persist unconditionally when Zod-valid; workflow advance is a separate check that reports `missingFieldIds` / `missingSignatureBlockIds` without blocking.
 
-**3. Workflow state model** (data model only — no UI yet)
-- `agreements.workflow_steps` JSON: ordered step sequence with role + required fields per step.
-- `submissions.current_step` + `submissions.history`: transitions with timestamps.
-- MVP exercises a single "self-sign" step; the data shape supports Party-A → Party-B routing + rework loops when the orchestrator lands.
+**✅ C.3 — URL-as-bearer-token ownership (PR #6)**
+- `submission_tokens` table: 32-char URL-safe secret (~192 bits entropy) via `crypto.randomBytes` → base64url.
+- `/s/{token}` route = owner's view. No accounts, no passwords. Same security model as DocuSign envelope links.
+- Uniform 404 on invalid token (no enumeration oracle).
+- Role enum (`owner` / `viewer` / `reviewer`) ready; MVP only mints owner.
 
-**4. URL-as-bearer-token ownership**
-- New `submission_tokens` table: 32-char URL-safe secret → submission id.
-- `/s/{token}` route = owner's view of their in-progress or completed submission.
-- Sharing the URL *is* the auth. Same model as DocuSign envelope links or unlisted Google Docs. No accounts, no login, no passwords.
-- Matches epic non-goal on multi-tenancy/auth; still gives per-submission privacy.
+**✅ C.4 — Form drafts (PR #7)**
+- `/api/drafts` endpoint — JSON upsert, no Zod validation, no workflow transition, no files.
+- `useDraftSave` hook — 1500 ms debounce; first save mints a token + rewrites URL to `/s/{token}` via `history.replaceState`.
+- `/s/{token}` branches on status: `draft` → editable FormRenderer with saved values; `submitted`/`signed` → read-only owner view.
+- Draft → submitted keeps the SAME token and SAME submission row — bookmarks survive the lifecycle.
 
-**5. Form drafts**
-- `submissions.status = "draft" | "submitted" | "signed"`.
-- Debounced save from `FormRenderer` while typing.
-- Resume via `/s/{token}` — form pre-fills from draft.
-- Solves "my phone died mid-fill" and reinforces the digitize-on-your-phone narrative.
+**✅ Cleanup — validation-surfaced fixes (PRs #8, #9, #10)**
+Two-wave validation pass against 6 documents (4 before cleanup + bicycle synthetic + Service Contract after) surfaced 11 issues. All closed:
+- **PR #8 issues:** self-step synthesis when no self block; `filledByRole` per field; `section` field grouping; low-confidence banner when most fields flagged; Phase E grouped-signature note in roadmap.
+- **PR #9 issues:** multi-page image ingestion (`source_paths_json`, `sources/{id}/page-{N}.{ext}`, N image content blocks with "Page X of N:" labels); dedicated Take Photo button; compare view upgraded for multi-page.
+- **PR #10 issues** (merge-timing race): page reorder buttons; per-field server error display; stale-error silent-resubmit fix; signature-required block-submit fix; synthetic test generator.
 
-**Exit bar for Phase C:**
-- All 5 items above are built and smoke-tested.
-- Re-spike results committed to `docs/vision-spike.md`.
-- `/a/{shortId}` still works from Phase B; new `/s/{token}` route serves owner views; drafts persist and resume.
+**Reference docs:** `docs/phase-c-workflow-decisions.md`, `docs/phase-c-bearer-token-decisions.md`, `docs/phase-c-drafts-decisions.md`, `docs/phase-c-multi-page-decisions.md`, `docs/phase-c-validation-log.md`.
 
-### Phase D — Rendering + style-matched form UI
+### 🔜 Phase D — Rendering + style-matched form UI (next)
 
 - Template HTML/CSS generator: Opus emits per-document HTML + CSS from `styleFingerprint`. Digital PDFs keep the text layer; image originals get best-match Google Fonts + extracted palette.
 - Server-side Puppeteer PDF rendering; output stored at `agreements/{id}/{submissionId}.pdf`.
