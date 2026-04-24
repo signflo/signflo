@@ -60,6 +60,16 @@ export default function IngestPage() {
     setPages((prev) => prev.filter((_, i) => i !== idx));
   }
 
+  function movePage(idx: number, direction: -1 | 1) {
+    setPages((prev) => {
+      const target = idx + direction;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = prev.slice();
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next;
+    });
+  }
+
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
     if (pages.length === 0) return;
@@ -163,14 +173,37 @@ export default function IngestPage() {
                     </div>
                     <div className="px-2 py-1.5 text-xs flex items-center justify-between gap-2 border-t border-neutral-100">
                       <span className="font-medium">#{i + 1}</span>
-                      <button
-                        type="button"
-                        onClick={() => removePage(i)}
-                        className="text-neutral-400 hover:text-red-700"
-                        aria-label={`Remove page ${i + 1}`}
-                      >
-                        ✕
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => movePage(i, -1)}
+                          disabled={i === 0}
+                          className="w-6 h-6 flex items-center justify-center text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                          aria-label={`Move page ${i + 1} up`}
+                          title="Move up"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => movePage(i, 1)}
+                          disabled={i === pages.length - 1}
+                          className="w-6 h-6 flex items-center justify-center text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                          aria-label={`Move page ${i + 1} down`}
+                          title="Move down"
+                        >
+                          ↓
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removePage(i)}
+                          className="w-6 h-6 flex items-center justify-center text-neutral-400 hover:text-red-700 hover:bg-red-50 rounded"
+                          aria-label={`Remove page ${i + 1}`}
+                          title="Remove"
+                        >
+                          ✕
+                        </button>
+                      </div>
                     </div>
                   </li>
                 ))}
